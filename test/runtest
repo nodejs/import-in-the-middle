@@ -1,0 +1,14 @@
+#!/usr/bin/env node
+
+const { spawn } = require('child_process')
+const path = require('path')
+
+process.env.NODE_NO_WARNINGS = 1
+
+spawn('node', [
+  '--unhandled-rejections=strict',
+  `--experimental-loader=${path.join(__dirname, '..', 'hook.mjs')}`,
+  ...process.argv.slice(2)
+], { stdio: 'inherit' }).on('close', code => {
+  process.exitCode = code
+})

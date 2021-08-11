@@ -1,0 +1,32 @@
+{
+  "name": "import-in-the-middle",
+  "version": "1.0.0",
+  "description": "Intercept imports in Node.js",
+  "main": "index.mjs",
+  "scripts": {
+    "test": "c8 --check-coverage --lines 100 imhotap --runner test/runtest --files test/*.mjs | tap-colorize"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/DataDog/import-in-the-middle.git"
+  },
+  "keywords": [
+    "import",
+    "ritm",
+    "iitm",
+    "loader",
+    "hook",
+    "hooks"
+  ],
+  "author": "Bryan English <bryan.english@datadoghq.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/DataDog/import-in-the-middle/issues"
+  },
+  "homepage": "https://github.com/DataDog/import-in-the-middle#readme",
+  "devDependencies": {
+    "c8": "^7.8.0",
+    "imhotap": "^1.1.0",
+    "tap-colorize": "^1.2.0"
+  }
+}
