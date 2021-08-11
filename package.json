@@ -19,7 +19,7 @@
     "hooks"
   ],
   "author": "Bryan English <bryan.english@datadoghq.com>",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "bugs": {
     "url": "https://github.com/DataDog/import-in-the-middle/issues"
   },
