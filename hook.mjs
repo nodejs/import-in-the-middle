@@ -1,5 +1,3 @@
-import { builtinModules } from 'module'
-
 export async function resolve (specifier, context, parentResolve) {
   const { parentURL = '' } = context
 
@@ -8,8 +6,7 @@ export async function resolve (specifier, context, parentResolve) {
   }
   const url = await parentResolve(specifier, context, parentResolve)
 
-  if (builtinModules.includes(specifier) ||
-      parentURL === import.meta.url ||
+  if (parentURL === import.meta.url ||
       parentURL.startsWith('iitm:')) {
     return url
   }
