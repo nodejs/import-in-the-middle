@@ -2,7 +2,8 @@
 
 **`import-in-the-middle`** is an module loading interceptor inspired by
 [`require-in-the-middle`](https://npm.im/require-in-the-middle), but
-specifically for ESM modules.
+specifically for ESM modules. In fact, it can even modify modules after loading
+time.
 
 ## Usage
 
@@ -34,3 +35,10 @@ command-line option.
 ```
 --loader=/path/to/import-in-the-middle/hook.mjs
 ```
+
+## Limitations
+
+* You cannot add new exports to a module. You can only modify existing ones.
+* While bindings to module exports end up being "re-bound" when modified in a
+  hook, dynamically imported modules cannot be altered after they're loaded.
+* Modules loaded via `require` are not affected at all.
