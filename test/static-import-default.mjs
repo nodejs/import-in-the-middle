@@ -2,10 +2,12 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-import { addHook } from '../index.mjs'
+import { addHook, enabled } from '../index.mjs'
 import barMjs from './fixtures/something.mjs'
 import barJs from './fixtures/something.js'
-import { strictEqual } from 'assert'
+import { strictEqual, ok } from 'assert'
+
+ok(enabled())
 
 addHook((name, exports) => {
   if (name.match(/something\.m?js/)) {

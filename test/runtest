@@ -9,10 +9,15 @@ const path = require('path')
 
 process.env.NODE_NO_WARNINGS = 1
 
-spawn('node', [
+const filename = process.argv[2]
+const args = [
   '--unhandled-rejections=strict',
-  `--experimental-loader=${path.join(__dirname, '..', 'hook.mjs')}`,
   ...process.argv.slice(2)
-], { stdio: 'inherit' }).on('close', code => {
+]
+if (!filename.includes('disabled')) {
+  args.unshift(`--experimental-loader=${path.join(__dirname, '..', 'hook.mjs')}`)
+}
+
+spawn('node', args, { stdio: 'inherit' }).on('close', code => {
   process.exitCode = code
 })

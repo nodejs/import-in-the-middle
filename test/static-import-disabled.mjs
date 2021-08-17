@@ -5,20 +5,13 @@
 import { addHook, enabled } from '../index.mjs'
 import { foo as fooMjs } from './fixtures/something.mjs'
 import { foo as fooJs } from './fixtures/something.js'
-import { freemem } from 'os'
-import { strictEqual, ok } from 'assert'
+import { strictEqual, fail, ok} from 'assert'
 
-ok(enabled())
+ok(!enabled())
 
-addHook((name, exports) => {
-  if (name.match(/something\.m?js/)) {
-    exports.foo += 15
-  }
-  if (name.match('os')) {
-    exports.freemem = () => 47
-  }
+addHook(() => {
+  fail('should not have been called at all')
 })
 
-strictEqual(fooMjs, 57)
-strictEqual(fooJs, 57)
-strictEqual(freemem(), 47)
+strictEqual(fooMjs, 42)
+strictEqual(fooJs, 42)

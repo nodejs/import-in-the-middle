@@ -14,7 +14,14 @@ const proxyHandler = {
   }
 }
 
+let isEnabled = false
+
+export function enabled() {
+  return isEnabled
+}
+
 export function _register(name, namespace, set) {
+  isEnabled = true
   setters.set(namespace, set)
   const proxy = new Proxy(namespace, proxyHandler)
   importHooks.forEach(hook => hook(name, proxy))
