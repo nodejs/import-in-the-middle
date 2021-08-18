@@ -2,7 +2,7 @@
   "name": "import-in-the-middle",
   "version": "1.0.0",
   "description": "Intercept imports in Node.js",
-  "main": "index.mjs",
+  "main": "index.js",
   "scripts": {
     "test": "c8 --check-coverage --lines 100 imhotap --runner test/runtest --files test/*.*js"
   },
