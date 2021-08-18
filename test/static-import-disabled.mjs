@@ -2,12 +2,10 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-import { addHook, enabled } from '../index.mjs'
+import { addHook } from '../index.js'
 import { foo as fooMjs } from './fixtures/something.mjs'
 import { foo as fooJs } from './fixtures/something.js'
-import { strictEqual, fail, ok} from 'assert'
-
-ok(!enabled())
+import { strictEqual, fail } from 'assert'
 
 addHook(() => {
   fail('should not have been called at all')

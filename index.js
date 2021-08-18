@@ -14,26 +14,19 @@ const proxyHandler = {
   }
 }
 
-let isEnabled = false
-
-export function enabled() {
-  return isEnabled
-}
-
-export function _register(name, namespace, set) {
-  isEnabled = true
+exports._register =  function _register(name, namespace, set) {
   setters.set(namespace, set)
   const proxy = new Proxy(namespace, proxyHandler)
   importHooks.forEach(hook => hook(name, proxy))
   toHook.push([name, proxy])
 }
 
-export function addHook(hook) {
+exports.addHook = function addHook(hook) {
   importHooks.push(hook)
   toHook.forEach(([name, namespace]) => hook(name, namespace))
 }
 
-export function removeHook(hook) {
+exports.removeHook = function removeHook(hook) {
   const index = importHooks.indexOf(hook)
   if (index > -1) {
     importHooks.splice(index, 1)

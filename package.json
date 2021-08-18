@@ -4,7 +4,7 @@
   "description": "Intercept imports in Node.js",
   "main": "index.mjs",
   "scripts": {
-    "test": "c8 --check-coverage --lines 100 imhotap --runner test/runtest --files test/*.mjs"
+    "test": "c8 --check-coverage --lines 100 imhotap --runner test/runtest --files test/*.*js"
   },
   "repository": {
     "type": "git",

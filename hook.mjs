@@ -30,7 +30,7 @@ export function getFormat (url, context, parentGetFormat) {
   return parentGetFormat(url, context, parentGetFormat)
 }
 
-const iitmURL = new URL('index.mjs', import.meta.url).toString()
+const iitmURL = new URL('index.js', import.meta.url).toString()
 export async function getSource (url, context, parentGetSource) {
   if (url.startsWith('iitm:')) {
     const realName = url.replace('iitm:', '')
