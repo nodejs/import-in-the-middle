@@ -2,25 +2,22 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-import Hook from '../index.js'
-import barMjs from './fixtures/something.mjs'
-import barJs from './fixtures/something.js'
+import Hook from '../../index.js'
 import { strictEqual } from 'assert'
 
 Hook((exports, name) => {
-  if (name.match(/something.mjs/)) {
+  if (name.match(/something\.m?js/)) {
     const orig = exports.default
     exports.default = function bar() {
       return orig() + 15
     }
   }
-  if (name.match(/something.js/)) {
-    const orig = exports.default
-    return function bar() {
-      return orig() + 15
-    }
-  }
 })
 
-strictEqual(barMjs(), 57)
-strictEqual(barJs(), 57)
+;(async () => {
+  const { default: barMjs } = await import('../fixtures/something.mjs')
+  const { default: barJs } = await import('../fixtures/something.js')
+
+  strictEqual(barMjs(), 57)
+  strictEqual(barJs(), 57)
+})()

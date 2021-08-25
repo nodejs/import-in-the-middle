@@ -2,24 +2,22 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-import Hook from '../index.js'
+import Hook from '../../index.js'
 import { strictEqual } from 'assert'
 
-Hook((exports, name) => {
+const hook = new Hook((exports, name) => {
   if (name.match(/something\.m?js/)) {
     exports.foo += 15
-  }
-  if (name.match('os')) {
-    exports.freemem = () => 47
   }
 })
 
 ;(async () => {
-  const { foo: fooMjs } = await import('./fixtures/something.mjs')
-  const { foo: fooJs } = await import('./fixtures/something.js')
-  const { freemem } = await import('os')
+  const { foo: fooMjs } = await import('../fixtures/something.mjs')
+
+  hook.unhook()
+
+  const { foo: fooJs } = await import('../fixtures/something.js')
 
   strictEqual(fooMjs, 57)
-  strictEqual(fooJs, 57)
-  strictEqual(freemem(), 47)
+  strictEqual(fooJs, 42)
 })()
