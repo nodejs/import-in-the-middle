@@ -1,8 +1,8 @@
-These tests have the following nomenclature:
+These tests are organized as follows:
 
-* Prefixed with `hook-` if they use the `Hook` class.
-* Prefixed with `ll-` if they use the "low-level" API, `addHook` and
-  `removeHook`.
+* Located in the `hook` directory if they use the `Hook` class.
+* Located in the `low-level` directory if they use the "low-level" API,
+  `addHook` and `removeHook`.
 
 The tests should be run with the `runtest` command found in this directory. If
 the command exits with a non-zero code, then it's a test failure.
