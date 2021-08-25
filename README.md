@@ -7,8 +7,11 @@ time.
 
 ## Usage
 
-See the Typescript definition file for API docs. The API for
-`require-in-the-middle` is followed as closely as possible.
+The API for
+`require-in-the-middle` is followed as closely as possible as the default
+export. There are lower-level `addHook` and `removeHook` exports available which
+don't do any filtering of modules, and present the full file URL as a parameter
+to the hook. See the Typescript definition file for detailed API docs.
 
 You can modify anything exported from any given ESM or CJS module that's
 imported in ESM files, regardless of whether they're imported statically or

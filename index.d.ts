@@ -23,7 +23,7 @@ export type Options = {
   internals?: boolean
 }
 
-export declare class Hook {
+declare class Hook {
   /**
    * Creates a hook to be run on any already loaded modules and any that will
    * be loaded in the future. It will be run once per loaded module. If
@@ -37,7 +37,9 @@ export declare class Hook {
    * they are mentioned specifically in the modules array.
    * @param {HookFunction} hookFn The function to be run on each module.
    */
-  constructor (modules?: Array<string>, options?: Options, hookFn: HookFunction)
+  constructor (modules: Array<string>, options: Options, hookFn: HookFunction)
+  constructor (modules: Array<string>, hookFn: HookFunction)
+  constructor (hookFn: HookFunction)
 
   /**
    * Disables this hook. It will no longer be run against any subsequently
@@ -46,9 +48,32 @@ export declare class Hook {
   unhook(): void
 }
 
+export default Hook
+
+/**
+ * A hook function to be run against loaded modules. To be used with the
+ * lower-level APIs `addHook` and `removeHook`.
+ * @param {url} string The absolute path of the module, as a `file:` URL string.
+ * @param {exported} { [string]: any } An object representing the exported items of a module.
+ */
+export type LLHookFunction = (url: string, exported: Namespace) => void
+
+/**
+ * Adds a hook to be run on any already loaded modules and any that will be loaded in the future.
+ * It will be run once per loaded module. If statically imported, any variables bound directly to
+ * exported items will be re-bound if those items are re-assigned in the hook.
+ *
+ * This is the lower-level API for hook creation. It will be run on every
+ * single imported module, rather than with any filtering.
+ * @param {HookFunction} hookFn The function to be run on each module.
+ */
+export declare function addHook(hookFn: HookFunction): void
+
 /**
  * Removes a hook that has been previously added with `addHook`. It will no longer be run against
  * any subsequently loaded modules.
+ *
+ * This is the lower-level API for hook removal, and cannot be used with the `Hook` class
  * @param {HookFunction} hookFn The function to be removed.
  */
-export declare function removeHook(hookFn: HookFunction): void
+export declare function removeHook(hookFn: LLHookFunction): void
