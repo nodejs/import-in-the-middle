@@ -2,13 +2,13 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-import { addHook } from '../index.js'
+import Hook from '../index.js'
 import { foo as fooMjs } from './fixtures/something.mjs'
 import { foo as fooJs } from './fixtures/something.js'
 import { freemem } from 'os'
 import { strictEqual } from 'assert'
 
-addHook((name, exports) => {
+Hook((exports, name) => {
   if (name.match(/something\.m?js/)) {
     exports.foo += 15
   }

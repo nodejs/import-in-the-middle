@@ -2,6 +2,8 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
+const specifiers = new Map()
+
 export async function resolve (specifier, context, parentResolve) {
   const { parentURL = '' } = context
 
@@ -10,10 +12,11 @@ export async function resolve (specifier, context, parentResolve) {
   }
   const url = await parentResolve(specifier, context, parentResolve)
 
-  if (parentURL === import.meta.url ||
-      parentURL.startsWith('iitm:')) {
+  if (parentURL === import.meta.url || parentURL.startsWith('iitm:')) {
     return url
   }
+
+  specifiers.set(url.url, specifier)
 
   return {
     url: `iitm:${url.url}`
@@ -33,15 +36,15 @@ export function getFormat (url, context, parentGetFormat) {
 const iitmURL = new URL('index.js', import.meta.url).toString()
 export async function getSource (url, context, parentGetSource) {
   if (url.startsWith('iitm:')) {
-    const realName = url.replace('iitm:', '')
-    const real = await import(realName)
-    const names = Object.keys(real)
+    const realUrl = url.replace('iitm:', '')
+    const realModule = await import(realUrl)
+    const exportNames = Object.keys(realModule)
     return {
       source: `
 import { _register } from '${iitmURL}'
 import * as namespace from '${url}'
 const set = {}
-${names.map((n) => `
+${exportNames.map((n) => `
 let $${n} = namespace.${n}
 export { $${n} as ${n} }
 set.${n} = (v) => {
@@ -49,7 +52,7 @@ set.${n} = (v) => {
   return true
 }
 `).join('\n')}
-_register('${realName}', namespace, set)
+_register('${realUrl}', namespace, set, '${specifiers.get(realUrl)}')
 `
     }
   }
