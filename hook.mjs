@@ -33,7 +33,7 @@ export function getFormat (url, context, parentGetFormat) {
   return parentGetFormat(url, context, parentGetFormat)
 }
 
-const iitmURL = new URL('index.js', import.meta.url).toString()
+const iitmURL = new URL('lib/register.js', import.meta.url).toString()
 export async function getSource (url, context, parentGetSource) {
   if (url.startsWith('iitm:')) {
     const realUrl = url.replace('iitm:', '')
@@ -41,7 +41,7 @@ export async function getSource (url, context, parentGetSource) {
     const exportNames = Object.keys(realModule)
     return {
       source: `
-import { _register } from '${iitmURL}'
+import { register } from '${iitmURL}'
 import * as namespace from '${url}'
 const set = {}
 ${exportNames.map((n) => `
@@ -52,7 +52,7 @@ set.${n} = (v) => {
   return true
 }
 `).join('\n')}
-_register('${realUrl}', namespace, set, '${specifiers.get(realUrl)}')
+register('${realUrl}', namespace, set, '${specifiers.get(realUrl)}')
 `
     }
   }

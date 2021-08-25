@@ -6,18 +6,11 @@ const path = require('path')
 const parse = require('module-details-from-path')
 const { fileURLToPath } = require('url')
 
-const importHooks = [] // TODO should this be a Set?
-
-const setters = new WeakMap()
-const specifiers = new Map()
-
-const toHook = []
-
-const proxyHandler = {
-  set(target, name, value) {
-    return setters.get(target)[name](value)
-  }
-}
+const {
+  importHooks,
+  specifiers,
+  toHook
+} = require('./lib/register')
 
 function addHook(hook) {
   importHooks.push(hook)
@@ -29,14 +22,6 @@ function removeHook(hook) {
   if (index > -1) {
     importHooks.splice(index, 1)
   }
-}
-
-function _register(name, namespace, set, specifier) {
-  specifiers.set(name, specifier)
-  setters.set(namespace, set)
-  const proxy = new Proxy(namespace, proxyHandler)
-  importHooks.forEach(hook => hook(name, proxy))
-  toHook.push([name, proxy])
 }
 
 function callHookFn(hookFn, namespace, name, baseDir) {
@@ -100,6 +85,5 @@ Hook.prototype.unhook = function () {
 }
 
 module.exports = Hook
-module.exports._register = _register
 module.exports.addHook = addHook
 module.exports.removeHook = removeHook
