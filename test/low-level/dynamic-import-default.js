@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-const { addHook } = require('../index.js')
+const { addHook } = require('../../index.js')
 const { strictEqual } = require('assert')
 
 addHook((name, exports) => {
@@ -15,8 +15,8 @@ addHook((name, exports) => {
 })
 
 ;(async () => {
-  const { default: barMjs } = await import('./fixtures/something.mjs')
-  const { default: barJs } = await import('./fixtures/something.js')
+  const { default: barMjs } = await import('../fixtures/something.mjs')
+  const { default: barJs } = await import('../fixtures/something.js')
 
   strictEqual(barMjs(), 57)
   strictEqual(barJs(), 57)

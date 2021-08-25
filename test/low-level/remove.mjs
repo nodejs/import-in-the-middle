@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-import { addHook, removeHook } from '../index.js'
+import { addHook, removeHook } from '../../index.js'
 import { strictEqual } from 'assert'
 
 const hook = (name, exports) => {
@@ -14,11 +14,11 @@ const hook = (name, exports) => {
 addHook(hook)
 
 ;(async () => {
-  const { foo: fooMjs } = await import('./fixtures/something.mjs')
+  const { foo: fooMjs } = await import('../fixtures/something.mjs')
 
   removeHook(hook)
 
-  const { foo: fooJs } = await import('./fixtures/something.js')
+  const { foo: fooJs } = await import('../fixtures/something.js')
 
   strictEqual(fooMjs, 57)
   strictEqual(fooJs, 42)
