@@ -2,13 +2,19 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-const { addHook } = require('../index.js')
+const Hook = require('../index.js')
 const { strictEqual } = require('assert')
 
-addHook((name, exports) => {
-  if (name.match(/something\.m?js/)) {
+Hook((exports, name) => {
+  if (name.match(/something.js/)) {
     const orig = exports.default
     exports.default = function bar() {
+      return orig() + 15
+    }
+  }
+  if (name.match(/something.mjs/)) {
+    const orig = exports.default
+    return function bar() {
       return orig() + 15
     }
   }

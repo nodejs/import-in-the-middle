@@ -3,19 +3,48 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
 /**
- * A hook function to be run against loaded modules.
- * @param {url} string The absolute path of the module, as a `file:` URL string.
- * @param {exported} { [string]: any } An object representing the exported items of a module.
+ * Property bag representing a module's exports, including the `default` if present.
  */
-export type HookFunction = (url: string, exported: { [string]: any }) => void
+export type Namespace = { [key: string]: any }
 
 /**
- * Adds a hook to be run on any already loaded modules and any that will be loaded in the future.
- * It will be run once per loaded module. If statically imported, any variables bound directly to
- * exported items will be re-bound if those items are re-assigned in the hook.
- * @param {HookFunction} hookFn The function to be run on each module.
+ * A hook function to be run against loaded modules.
+ * @param {exported} { [string]: any } An object representing the exported items of a module.
+ * @param {name} string The name of the module. If it is (or is part of) a
+ * package in a node_modules directory, this will be the path of the file
+ * starting from the package name.
+ * @param {baseDir} string The absolute path of the module, if not provided in `name`.
+ * @return any A value that can will be assigned to `exports.default`. This is
+ * equivalent to doing that assignment in the body of this function.
  */
-export declare function addHook(hookFn: HookFunction): void
+export type HookFunction = (exported: Namespace, name: string, baseDir: string|void) => any
+
+export type Options = {
+  internals?: boolean
+}
+
+export declare class Hook {
+  /**
+   * Creates a hook to be run on any already loaded modules and any that will
+   * be loaded in the future. It will be run once per loaded module. If
+   * statically imported, any variables bound directly to exported items will
+   * be re-bound if those items are re-assigned in the hook function.
+   * @param {Array<string>} [modules] A list of modules to run this hook on. If
+   * omitted, it will run on every import everywhere.
+   * @param {Options} [options] An options object. If omitted, the default is `{
+   * internals: false }`. If internals is true, then the hook will operate on
+   * internal modules of packages in node_modules. Otherwise it will not, unless
+   * they are mentioned specifically in the modules array.
+   * @param {HookFunction} hookFn The function to be run on each module.
+   */
+  constructor (modules?: Array<string>, options?: Options, hookFn: HookFunction)
+
+  /**
+   * Disables this hook. It will no longer be run against any subsequently
+   * loaded modules.
+   */
+  unhook(): void
+}
 
 /**
  * Removes a hook that has been previously added with `addHook`. It will no longer be run against
