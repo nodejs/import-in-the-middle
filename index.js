@@ -19,6 +19,18 @@ const proxyHandler = {
   }
 }
 
+function addHook(hook) {
+  importHooks.push(hook)
+  toHook.forEach(([name, namespace]) => hook(name, namespace))
+}
+
+function removeHook(hook) {
+  const index = importHooks.indexOf(hook)
+  if (index > -1) {
+    importHooks.splice(index, 1)
+  }
+}
+
 function _register(name, namespace, set, specifier) {
   specifiers.set(name, specifier)
   setters.set(namespace, set)
@@ -80,17 +92,14 @@ function Hook(modules, options, hookFn) {
     }
   }
 
-  importHooks.push(this._iitmHook)
-  toHook.forEach(([name, namespace]) => this._iitmHook(name, namespace))
+  addHook(this._iitmHook)
 }
 
 Hook.prototype.unhook = function () {
-  const index = importHooks.indexOf(this._iitmHook)
-  if (index > -1) {
-    importHooks.splice(index, 1)
-  }
+  removeHook(this._iitmHook)
 }
 
 module.exports = Hook
-
 module.exports._register = _register
+module.exports.addHook = addHook
+module.exports.removeHook = removeHook
