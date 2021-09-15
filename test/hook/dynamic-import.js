@@ -9,8 +9,10 @@ Hook((exports, name) => {
   if (name.match(/something\.m?js/)) {
     exports.foo += 15
   }
-  if (name.match('os')) {
-    exports.freemem = () => 47
+  if (name === 'os') {
+    Object.defineProperty(exports, 'freemem', {
+      value: () => 47
+    })
   }
 })
 
