@@ -59,3 +59,17 @@ register('${realUrl}', namespace, set, '${specifiers.get(realUrl)}')
 
   return parentGetSource(url, context, parentGetSource)
 }
+
+// For Node.js 16.12.0 and higher.
+export async function load (url, context, parentLoad) {
+  if (url.startsWith('iitm:')) {
+    const { source } = await getSource(url, context)
+    return {
+      source,
+      format: 'module'
+    }
+  }
+
+  return parentLoad(url, context, parentLoad)
+}
+
