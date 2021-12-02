@@ -4,8 +4,8 @@
   "description": "Intercept imports in Node.js",
   "main": "index.js",
   "scripts": {
-    "test": "c8 --check-coverage --lines 90 imhotap --runner test/runtest --files test/{hook,low-level}/*.*js",
-    "coverage": "c8 --reporter html imhotap --runner test/runtest --files test/{hook,low-level}/*.*js && echo '\nNow open coverage/index.html\n'"
+    "test": "c8 --check-coverage --lines 90 imhotap --runner test/runtest --files test/{hook,low-level,other}/*",
+    "coverage": "c8 --reporter html imhotap --runner test/runtest --files test/{hook,low-level,other}/* && echo '\nNow open coverage/index.html\n'"
   },
   "repository": {
     "type": "git",
@@ -27,7 +27,7 @@
   "homepage": "https://github.com/DataDog/import-in-the-middle#readme",
   "devDependencies": {
     "c8": "^7.8.0",
-    "imhotap": "^1.1.0"
+    "imhotap": "^2.0.0"
   },
   "dependencies": {
     "module-details-from-path": "^1.0.3"
