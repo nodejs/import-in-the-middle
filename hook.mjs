@@ -4,6 +4,10 @@
 
 const specifiers = new Map()
 
+const EXTENSION_RE = /\.(js|mjs|cjs)$/
+
+let entrypoint
+
 export async function resolve (specifier, context, parentResolve) {
   const { parentURL = '' } = context
 
@@ -11,6 +15,11 @@ export async function resolve (specifier, context, parentResolve) {
     specifier = specifier.replace('iitm:', '')
   }
   const url = await parentResolve(specifier, context, parentResolve)
+
+  if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
+    entrypoint = url.url
+    return { url: url.url, format: 'commonjs' }
+  }
 
   if (parentURL === import.meta.url || parentURL.startsWith('iitm:')) {
     return url
@@ -27,6 +36,11 @@ export function getFormat (url, context, parentGetFormat) {
   if (url.startsWith('iitm:')) {
     return {
       format: 'module'
+    }
+  }
+  if (url === entrypoint) {
+    return {
+      format: 'commonjs'
     }
   }
 
