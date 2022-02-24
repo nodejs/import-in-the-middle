@@ -11,8 +11,8 @@ let entrypoint
 export async function resolve (specifier, context, parentResolve) {
   const { parentURL = '' } = context
 
-  if (specifier.startsWith('iitm:')) {
-    specifier = specifier.replace('iitm:', '')
+  if (specifier.startsWith('file:iitm:')) {
+    specifier = specifier.replace('file:iitm:', '')
   }
   const url = await parentResolve(specifier, context, parentResolve)
 
@@ -21,19 +21,19 @@ export async function resolve (specifier, context, parentResolve) {
     return { url: url.url, format: 'commonjs' }
   }
 
-  if (parentURL === import.meta.url || parentURL.startsWith('iitm:')) {
+  if (parentURL === import.meta.url || parentURL.startsWith('file:iitm:')) {
     return url
   }
 
   specifiers.set(url.url, specifier)
 
   return {
-    url: `iitm:${url.url}`
+    url: `file:iitm:${url.url}`
   }
 }
 
 export function getFormat (url, context, parentGetFormat) {
-  if (url.startsWith('iitm:')) {
+  if (url.startsWith('file:iitm:')) {
     return {
       format: 'module'
     }
@@ -49,8 +49,8 @@ export function getFormat (url, context, parentGetFormat) {
 
 const iitmURL = new URL('lib/register.js', import.meta.url).toString()
 export async function getSource (url, context, parentGetSource) {
-  if (url.startsWith('iitm:')) {
-    const realUrl = url.replace('iitm:', '')
+  if (url.startsWith('file:iitm:')) {
+    const realUrl = url.replace('file:iitm:', '')
     const realModule = await import(realUrl)
     const exportNames = Object.keys(realModule)
     return {
@@ -76,7 +76,7 @@ register('${realUrl}', namespace, set, '${specifiers.get(realUrl)}')
 
 // For Node.js 16.12.0 and higher.
 export async function load (url, context, parentLoad) {
-  if (url.startsWith('iitm:')) {
+  if (url.startsWith('file:iitm:')) {
     const { source } = await getSource(url, context)
     return {
       source,
