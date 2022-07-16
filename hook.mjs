@@ -6,6 +6,8 @@ const specifiers = new Map()
 
 const EXTENSION_RE = /\.(js|mjs|cjs)$/
 
+const NODE_MAJOR = Number(process.versions.node.split('.')[0])
+
 let entrypoint
 
 function hasIitm (url) {
@@ -22,8 +24,16 @@ function deleteIitm (url) {
     const urlObj = new URL(url)
     if (urlObj.searchParams.has('iitm')) {
       urlObj.searchParams.delete('iitm')
+      resultUrl = urlObj.href
+      if (resultUrl.startsWith('file:node:')) {
+        resultUrl = resultUrl.replace('file:', '')
+      }
+      if (resultUrl.startsWith('file:///node:')) {
+        resultUrl = resultUrl.replace('file:///', '')
+      }
+    } else {
+      resultUrl = urlObj.href
     }
-    resultUrl = urlObj.href
   } catch {
     resultUrl = url
   }
@@ -33,7 +43,7 @@ function deleteIitm (url) {
 function addIitm (url) {
   const urlObj = new URL(url)
   urlObj.searchParams.set('iitm', 'true')
-  return urlObj.href
+  return urlObj.protocol !== 'file:' && NODE_MAJOR < 18 ? 'file:' + urlObj.href :  urlObj.href
 }
 
 export async function resolve (specifier, context, parentResolve) {
