@@ -8,32 +8,58 @@ const EXTENSION_RE = /\.(js|mjs|cjs)$/
 
 let entrypoint
 
+function hasIitm (url) {
+  try {
+    return new URL(url).searchParams.has('iitm')
+  } catch {
+    return false
+  }
+}
+
+function deleteIitm (url) {
+  let resultUrl
+  try {
+    const urlObj = new URL(url)
+    if (urlObj.searchParams.has('iitm')) {
+      urlObj.searchParams.delete('iitm')
+    }
+    resultUrl = urlObj.href
+  } catch {
+    resultUrl = url
+  }
+  return resultUrl
+}
+
+function addIitm (url) {
+  const urlObj = new URL(url)
+  urlObj.searchParams.set('iitm', 'true')
+  return urlObj.href
+}
+
 export async function resolve (specifier, context, parentResolve) {
   const { parentURL = '' } = context
 
-  if (specifier.startsWith('file:iitm:')) {
-    specifier = specifier.replace('file:iitm:', '')
-  }
-  const url = await parentResolve(specifier, context, parentResolve)
+  const url = await parentResolve(deleteIitm(specifier), context, parentResolve)
 
   if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
     entrypoint = url.url
     return { url: url.url, format: 'commonjs' }
   }
 
-  if (parentURL === import.meta.url || parentURL.startsWith('file:iitm:')) {
+  if (parentURL === import.meta.url || hasIitm(parentURL)) {
     return url
   }
 
   specifiers.set(url.url, specifier)
 
   return {
-    url: `file:iitm:${url.url}`
+    url: addIitm(url.url),
+    shortCircuit: true
   }
 }
 
 export function getFormat (url, context, parentGetFormat) {
-  if (url.startsWith('file:iitm:')) {
+  if (hasIitm(url)) {
     return {
       format: 'module'
     }
@@ -49,8 +75,8 @@ export function getFormat (url, context, parentGetFormat) {
 
 const iitmURL = new URL('lib/register.js', import.meta.url).toString()
 export async function getSource (url, context, parentGetSource) {
-  if (url.startsWith('file:iitm:')) {
-    const realUrl = url.replace('file:iitm:', '')
+  if (hasIitm(url)) {
+    const realUrl = deleteIitm(url)
     const realModule = await import(realUrl)
     const exportNames = Object.keys(realModule)
     return {
@@ -76,10 +102,11 @@ register('${realUrl}', namespace, set, '${specifiers.get(realUrl)}')
 
 // For Node.js 16.12.0 and higher.
 export async function load (url, context, parentLoad) {
-  if (url.startsWith('file:iitm:')) {
+  if (hasIitm(url)) {
     const { source } = await getSource(url, context)
     return {
       source,
+      shortCircuit: true,
       format: 'module'
     }
   }
