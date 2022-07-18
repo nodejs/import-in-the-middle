@@ -4,7 +4,7 @@
 
 const specifiers = new Map()
 
-const EXTENSION_RE = /\.(js|mjs|cjs)$/
+const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
 
 const NODE_MAJOR = Number(process.versions.node.split('.')[0])
 

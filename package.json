@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "c8 --check-coverage --lines 90 imhotap --runner test/runtest --files test/{hook,low-level,other}/*",
+    "test:ts": "node --test --experimental-specifier-resolution=node --require ts-node/register --loader ./hook.mjs --loader ts-node/esm test/typescript/*.test.mts",
     "coverage": "c8 --reporter html imhotap --runner test/runtest --files test/{hook,low-level,other}/* && echo '\nNow open coverage/index.html\n'"
   },
   "repository": {
@@ -26,8 +27,11 @@
   },
   "homepage": "https://github.com/DataDog/import-in-the-middle#readme",
   "devDependencies": {
+    "@types/node": "^18.0.6",
     "c8": "^7.8.0",
-    "imhotap": "^2.0.0"
+    "imhotap": "^2.0.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^4.7.4"
   },
   "dependencies": {
     "module-details-from-path": "^1.0.3"
