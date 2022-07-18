@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { addHook } from "../../index.js";
-import { sayHi } from "./say-hi.js";
+import { sayHi } from "./say-hi.mjs";
 
 addHook((url, exported) => {
-  if (url.toLowerCase().endsWith('say-hi.ts')) {
-    exported.sayHi = () => 'Hooked';
+  if (url.toLowerCase().endsWith("say-hi.mts")) {
+    exported.sayHi = () => "Hooked";
   }
 });
 
