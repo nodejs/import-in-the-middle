@@ -17,5 +17,3 @@ jobs:
           node-version: ${{ matrix.node-version }}
       - run: npm install
       - run: npm test
-      - run: npm run test:ts
-        if: matrix.node-version == '18.x'
