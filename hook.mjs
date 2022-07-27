@@ -4,7 +4,9 @@
 
 const specifiers = new Map()
 
-const EXTENSION_RE = /\.(js|mjs|cjs)$/
+// FIXME: Typescript extensions are added temporarily until we find a better
+// way of supporting arbitrary extensions
+const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
 
 const NODE_MAJOR = Number(process.versions.node.split('.')[0])
 
