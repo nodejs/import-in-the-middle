@@ -9,7 +9,9 @@ addHook(function (name, namespace, specifierParam ) {
 })
 
 strictEqual(specifier, undefined)
-const { foo } = await import('../fixtures/something.mjs')
+;(async () => {
+  const { foo } = await import('../fixtures/something.mjs')
 
-strictEqual(specifier, '../fixtures/something.mjs')
-strictEqual(foo, 42)
+  strictEqual(specifier, '../fixtures/something.mjs')
+  strictEqual(foo, 42)
+})()
