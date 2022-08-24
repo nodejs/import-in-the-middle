@@ -59,9 +59,10 @@ export default Hook
  * lower-level APIs `addHook` and `removeHook`.
  * @param {url} string The absolute path of the module, as a `file:` URL string.
  * @param {exported} { [string]: any } An object representing the exported
+ * @param {specifier} string The name used to import the module
  * items of a module.
  */
-export type HookFunction = (url: string, exported: Namespace) => void
+export type HookFunction = (url: string, exported: Namespace, specifier: string) => void
 
 /**
  * Adds a hook to be run on any already loaded modules and any that will be

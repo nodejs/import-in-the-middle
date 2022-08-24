@@ -14,7 +14,7 @@ const {
 
 function addHook(hook) {
   importHooks.push(hook)
-  toHook.forEach(([name, namespace]) => hook(name, namespace))
+  toHook.forEach(([name, namespace]) => hook(name, namespace, specifiers.get(name)))
 }
 
 function removeHook(hook) {
