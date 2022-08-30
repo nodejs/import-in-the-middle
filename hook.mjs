@@ -48,7 +48,9 @@ function addIitm (url) {
   if (NODE_MAJOR === 17) {
     return urlObj.protocol !== 'file:' ? 'file:' + urlObj.href :  urlObj.href
   }
-  return (urlObj.protocol !== 'file:' && urlObj.protocol !== 'node:') && NODE_MAJOR < 18 ? 'file:' + urlObj.href :  urlObj.href
+  return urlObj.protocol !== 'file:' && urlObj.protocol !== 'node:' && NODE_MAJOR < 18
+    ? 'file:' + urlObj.href
+    : urlObj.href
 }
 
 export async function resolve (specifier, context, parentResolve) {
