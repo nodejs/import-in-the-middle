@@ -45,7 +45,7 @@ function deleteIitm (url) {
 function addIitm (url) {
   const urlObj = new URL(url)
   urlObj.searchParams.set('iitm', 'true')
-  return urlObj.protocol !== 'file:' && NODE_MAJOR < 18 ? 'file:' + urlObj.href :  urlObj.href
+  return (urlObj.protocol !== 'file:' && urlObj.protocol !== 'node:') && NODE_MAJOR < 18 ? 'file:' + urlObj.href :  urlObj.href
 }
 
 export async function resolve (specifier, context, parentResolve) {
