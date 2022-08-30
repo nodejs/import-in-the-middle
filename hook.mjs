@@ -45,12 +45,14 @@ function deleteIitm (url) {
 function addIitm (url) {
   const urlObj = new URL(url)
   urlObj.searchParams.set('iitm', 'true')
+  if (NODE_MAJOR === 17) {
+    return urlObj.protocol !== 'file:' ? 'file:' + urlObj.href :  urlObj.href
+  }
   return (urlObj.protocol !== 'file:' && urlObj.protocol !== 'node:') && NODE_MAJOR < 18 ? 'file:' + urlObj.href :  urlObj.href
 }
 
 export async function resolve (specifier, context, parentResolve) {
   const { parentURL = '' } = context
-
   const url = await parentResolve(deleteIitm(specifier), context, parentResolve)
 
   if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
