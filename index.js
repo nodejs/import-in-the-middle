@@ -51,7 +51,11 @@ function Hook(modules, options, hookFn) {
     if (isBuiltin) {
       name = name.replace(/^node:/, '')
     } else {
-      name = name.replace(/^file:\/\//, '')
+      if (name.startsWith('file://')) {
+        try {
+          name = fileURLToPath(name)
+        } catch (e) {}
+      }
       const details = parse(name)
       if (details) {
         name = details.name
