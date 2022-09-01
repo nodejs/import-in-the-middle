@@ -6,6 +6,7 @@
 
 const { spawn } = require('child_process')
 const path = require('path')
+const url = require('url')
 
 process.env.NODE_NO_WARNINGS = 1
 
@@ -20,7 +21,7 @@ if (!filename.includes('disabled')) {
     ? path.join(__dirname, 'typescript', 'iitm-ts-node-loader.mjs')
     : path.join(__dirname, '..', 'hook.mjs')
 
-  args.unshift(`--experimental-loader=${loaderPath}`)
+  args.unshift(`--experimental-loader=${url.pathToFileURL(loaderPath)}`)
 }
 
 spawn('node', args, { stdio: 'inherit' }).on('close', code => {
