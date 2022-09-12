@@ -3,12 +3,15 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
 const specifiers = new Map()
+const isWin = process.platform === "win32"
+
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
 const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
-
-const NODE_MAJOR = Number(process.versions.node.split('.')[0])
+const NODE_VERSION = process.versions.node.split('.')
+const NODE_MAJOR = Number(NODE_VERSION[0])
+const NODE_MINOR = Number(NODE_VERSION[1])
 
 let entrypoint
 
@@ -42,21 +45,42 @@ function deleteIitm (url) {
   return resultUrl
 }
 
+function isNode16AndBiggerOrEqualsThan16_17_0() {
+  return NODE_MAJOR === 16 && NODE_MINOR >= 17
+}
+
+function isFileProtocol (urlObj) {
+  return urlObj.protocol === 'file:'
+}
+
+function isNodeProtocol (urlObj) {
+  return urlObj.protocol === 'node:'
+}
+
+function needsToAddFileProtocol(urlObj) {
+  if (NODE_MAJOR === 17) {
+    return !isFileProtocol(urlObj)
+  }
+  if (isNode16AndBiggerOrEqualsThan16_17_0()) {
+    return !isFileProtocol(urlObj) && !isNodeProtocol(urlObj)
+  }
+  return !isFileProtocol(urlObj) && NODE_MAJOR < 18
+}
+
+
 function addIitm (url) {
   const urlObj = new URL(url)
   urlObj.searchParams.set('iitm', 'true')
-  if (NODE_MAJOR === 17) {
-    return urlObj.protocol !== 'file:' ? 'file:' + urlObj.href :  urlObj.href
-  }
-  return urlObj.protocol !== 'file:' && urlObj.protocol !== 'node:' && NODE_MAJOR < 18
-    ? 'file:' + urlObj.href
-    : urlObj.href
+  return needsToAddFileProtocol(urlObj) ? 'file:' + urlObj.href : urlObj.href
 }
 
 export async function resolve (specifier, context, parentResolve) {
   const { parentURL = '' } = context
-  const url = await parentResolve(deleteIitm(specifier), context, parentResolve)
-
+  const newSpecifier = deleteIitm(specifier)
+  if (isWin && parentURL.indexOf('file:node') === 0) {
+    context.parentURL = ''
+  }
+  const url = await parentResolve(newSpecifier, context, parentResolve)
   if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
     entrypoint = url.url
     return { url: url.url, format: 'commonjs' }
