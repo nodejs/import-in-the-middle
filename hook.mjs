@@ -90,6 +90,11 @@ export async function resolve (specifier, context, parentResolve) {
     return url
   }
 
+  if (context.importAssertions && context.importAssertions.type === 'json') {
+    return url
+  }
+
+
   specifiers.set(url.url, specifier)
 
   return {

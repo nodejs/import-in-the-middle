@@ -15,6 +15,18 @@ const args = [
   '--unhandled-rejections=strict',
   ...process.argv.slice(2)
 ]
+
+const [processMajor] = process.versions.node.split('.').map(Number)
+
+const match = filename.match(/v([0-9]+)/)
+
+const versionRequirement = match ? match[1] : 0;
+
+if (processMajor < versionRequirement) {
+  console.log(`skipping ${filename} as this is Node.js v${processMajor} and test wants v${versionRequirement}`);
+  process.exit(0);
+}
+
 if (!filename.includes('disabled')) {
   const isTypescript = path.extname(filename).slice(-2) === 'ts'
   const loaderPath = isTypescript
