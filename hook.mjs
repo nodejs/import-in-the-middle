@@ -90,7 +90,7 @@ export async function resolve (specifier, context, parentResolve) {
     return url
   }
 
-  if (context.importAssertions.type === 'json') {
+  if (context.importAssertions && context.importAssertions.type === 'json') {
     return url
   }
 
