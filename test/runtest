@@ -18,9 +18,11 @@ const args = [
 
 const [processMajor] = process.versions.node.split('.').map(Number)
 
-const versionRequirement = Number(filename.match(/v([0-9]+)/)?.[1])
+const match = filename.match(/v([0-9]+)/)
 
-if (versionRequirement && processMajor < versionRequirement) {
+const versionRequirement = match ? match[1] : 0;
+
+if (processMajor < versionRequirement) {
   console.log(`skipping ${filename} as this is Node.js v${processMajor} and test wants v${versionRequirement}`);
   process.exit(0);
 }
