@@ -149,6 +149,7 @@ register('${realUrl}', namespace, set, '${specifiers.get(realUrl)}')
   }
 
   if (NODE_MAJOR >= 20) {
+    process.emitWarning('import-in-the-middle is currently unsupported on Node.js v20 and has been disabled.')
     return {} // TODO: Add support for Node >=20
   } else if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
     return { load, resolve }
