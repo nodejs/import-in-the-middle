@@ -2,8 +2,4 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-import { createHook } from './hook.js'
-
-const { load, resolve, getFormat, getSource } = createHook(import.meta)
-
-export { load, resolve, getFormat, getSource }
+// Empty file just to validate the loader is not crashing.
