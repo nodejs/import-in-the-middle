@@ -6,8 +6,6 @@ const specifiers = new Map()
 const isWin = process.platform === "win32"
 const hookUrl = `file://${module.filename}`
 
-console.log(hookUrl)
-
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
 const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
@@ -26,6 +24,8 @@ function hasIitm (url) {
 }
 
 function isIitm (url) {
+  const unixUrl = url.replace('file://', 'file:///').replace('\\\\', '/')
+  console.log(unixUrl)
   return url === hookUrl || url === hookUrl.replace('hook.js', 'hook.mjs')
 }
 
