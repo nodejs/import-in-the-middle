@@ -6,6 +6,7 @@ const specifiers = new Map()
 const isWin = process.platform === "win32"
 const hookUrl = `file://${module.filename}`
 
+console.log(hookUrl)
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
