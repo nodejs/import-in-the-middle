@@ -4,7 +4,6 @@
 
 const specifiers = new Map()
 const isWin = process.platform === "win32"
-const hookUrl = `file://${module.filename}`
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
@@ -23,10 +22,8 @@ function hasIitm (url) {
   }
 }
 
-function isIitm (url) {
-  const unixUrl = url.replace('file://', 'file:///').replace('\\\\', '/')
-  console.log(unixUrl)
-  return url === hookUrl || url === hookUrl.replace('hook.js', 'hook.mjs')
+function isIitm (url, meta) {
+  return url === meta.url || url === meta.url.replace('hook.mjs', 'hook.js')
 }
 
 function deleteIitm (url) {
@@ -80,43 +77,44 @@ function addIitm (url) {
   return needsToAddFileProtocol(urlObj) ? 'file:' + urlObj.href : urlObj.href
 }
 
-async function resolve (specifier, context, parentResolve) {
-  const { parentURL = '' } = context
-  const newSpecifier = deleteIitm(specifier)
-  if (isWin && parentURL.indexOf('file:node') === 0) {
-    context.parentURL = ''
-  }
-  const url = await parentResolve(newSpecifier, context, parentResolve)
-  if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
-    entrypoint = url.url
-    return { url: url.url, format: 'commonjs' }
-  }
+function createHook (meta) {
+  async function resolve (specifier, context, parentResolve) {
+    const { parentURL = '' } = context
+    const newSpecifier = deleteIitm(specifier)
+    if (isWin && parentURL.indexOf('file:node') === 0) {
+      context.parentURL = ''
+    }
+    const url = await parentResolve(newSpecifier, context, parentResolve)
+    if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
+      entrypoint = url.url
+      return { url: url.url, format: 'commonjs' }
+    }
 
-  if (isIitm(parentURL) || hasIitm(parentURL)) {
-    return url
-  }
+    if (isIitm(parentURL, meta) || hasIitm(parentURL)) {
+      return url
+    }
 
-  if (context.importAssertions && context.importAssertions.type === 'json') {
-    return url
-  }
+    if (context.importAssertions && context.importAssertions.type === 'json') {
+      return url
+    }
 
 
-  specifiers.set(url.url, specifier)
+    specifiers.set(url.url, specifier)
 
-  return {
-    url: addIitm(url.url),
-    shortCircuit: true
-  }
-}
-
-const iitmURL = new URL('lib/register.js', hookUrl).toString()
-async function getSource (url, context, parentGetSource) {
-  if (hasIitm(url)) {
-    const realUrl = deleteIitm(url)
-    const realModule = await import(realUrl)
-    const exportNames = Object.keys(realModule)
     return {
-      source: `
+      url: addIitm(url.url),
+      shortCircuit: true
+    }
+  }
+
+  const iitmURL = new URL('lib/register.js', meta.url).toString()
+  async function getSource (url, context, parentGetSource) {
+    if (hasIitm(url)) {
+      const realUrl = deleteIitm(url)
+      const realModule = await import(realUrl)
+      const exportNames = Object.keys(realModule)
+      return {
+        source: `
 import { register } from '${iitmURL}'
 import * as namespace from '${url}'
 const set = {}
@@ -130,48 +128,51 @@ set.${n} = (v) => {
 `).join('\n')}
 register('${realUrl}', namespace, set, '${specifiers.get(realUrl)}')
 `
+      }
     }
+
+    return parentGetSource(url, context, parentGetSource)
   }
 
-  return parentGetSource(url, context, parentGetSource)
-}
+  // For Node.js 16.12.0 and higher.
+  async function load (url, context, parentLoad) {
+    if (hasIitm(url)) {
+      const { source } = await getSource(url, context)
+      return {
+        source,
+        shortCircuit: true,
+        format: 'module'
+      }
+    }
 
-// For Node.js 16.12.0 and higher.
-async function load (url, context, parentLoad) {
-  if (hasIitm(url)) {
-    const { source } = await getSource(url, context)
+    return parentLoad(url, context, parentLoad)
+  }
+
+  if (NODE_MAJOR >= 20) {
+    return {} // TODO: Add support for Node >=20
+  } else if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
+    return { load, resolve }
+  } else {
     return {
-      source,
-      shortCircuit: true,
-      format: 'module'
-    }
-  }
-
-  return parentLoad(url, context, parentLoad)
-}
-
-if (NODE_MAJOR >= 20) {
-  module.exports = {} // TODO: Add support for Node >=20
-} else if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
-  module.exports = { load, resolve }
-} else {
-  module.exports = {
-    load,
-    resolve,
-    getSource,
-    getFormat (url, context, parentGetFormat) {
-      if (hasIitm(url)) {
-        return {
-          format: 'module'
+      load,
+      resolve,
+      getSource,
+      getFormat (url, context, parentGetFormat) {
+        if (hasIitm(url)) {
+          return {
+            format: 'module'
+          }
         }
-      }
-      if (url === entrypoint) {
-        return {
-          format: 'commonjs'
+        if (url === entrypoint) {
+          return {
+            format: 'commonjs'
+          }
         }
-      }
 
-      return parentGetFormat(url, context, parentGetFormat)
+        return parentGetFormat(url, context, parentGetFormat)
+      }
     }
   }
 }
+
+module.exports = { createHook }
