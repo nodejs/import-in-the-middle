@@ -5,7 +5,6 @@
   "main": "index.js",
   "scripts": {
     "test": "c8 --check-coverage --lines 85 imhotap --runner test/runtest --files test/{hook,low-level,other,get-esm-exports}/*",
-    "test:unsupported": "imhotap --runner test/runtest --files test/hook/loader.mjs",
     "test-win": "c8 --check-coverage --lines 85 imhotap --runner test\\runtest.bat --files test/{hook,low-level,other,get-esm-exports}/*",
     "test:ts": "c8 imhotap --runner test/runtest --files test/typescript/*.test.mts",
     "test-win:ts": "c8 imhotap --runner test\\runtest.bat --files test/typescript/*.test.mts",
