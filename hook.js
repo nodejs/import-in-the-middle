@@ -17,9 +17,7 @@ let entrypoint
 if (NODE_MAJOR >= 20) {
   getExports = require('./lib/get-exports.js')
 } else {
-  getExports = async function (url) {
-    return Object.keys(await import(url))
-  }
+  getExports = (url) => import(url).then(Object.keys)
 }
 
 function hasIitm (url) {
