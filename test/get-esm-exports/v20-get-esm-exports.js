@@ -11,7 +11,7 @@ const fixture = fs.readFileSync(fixturePath, 'utf8')
 fixture.split('\n').forEach(line => {
   if (!line.includes(' //| ')) return
   const [mod, testStr] = line.split(' //| ')
-  const expectedNames = testStr.split(',')
+  const expectedNames = testStr.split(',').map(x => x.trim())
   if (expectedNames[0] === '') {
     expectedNames.length = 0
   }
