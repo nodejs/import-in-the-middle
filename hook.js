@@ -14,6 +14,12 @@ const NODE_MINOR = Number(NODE_VERSION[1])
 
 let entrypoint
 
+if (NODE_MAJOR >= 20) {
+  getExports = require('./lib/get-exports.js')
+} else {
+  getExports = (url) => import(url).then(Object.keys)
+}
+
 function hasIitm (url) {
   try {
     return new URL(url).searchParams.has('iitm')
@@ -103,7 +109,8 @@ function createHook (meta) {
 
     return {
       url: addIitm(url.url),
-      shortCircuit: true
+      shortCircuit: true,
+      format: url.format
     }
   }
 
@@ -111,8 +118,7 @@ function createHook (meta) {
   async function getSource (url, context, parentGetSource) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
-      const realModule = await import(realUrl)
-      const exportNames = Object.keys(realModule)
+      const exportNames = await getExports(realUrl, context, parentGetSource)
       return {
         source: `
 import { register } from '${iitmURL}'
@@ -137,7 +143,7 @@ register('${realUrl}', namespace, set, '${specifiers.get(realUrl)}')
   // For Node.js 16.12.0 and higher.
   async function load (url, context, parentLoad) {
     if (hasIitm(url)) {
-      const { source } = await getSource(url, context)
+      const { source } = await getSource(url, context, parentLoad)
       return {
         source,
         shortCircuit: true,
@@ -148,10 +154,7 @@ register('${realUrl}', namespace, set, '${specifiers.get(realUrl)}')
     return parentLoad(url, context, parentLoad)
   }
 
-  if (NODE_MAJOR >= 20) {
-    process.emitWarning('import-in-the-middle is currently unsupported on Node.js v20 and has been disabled.')
-    return {} // TODO: Add support for Node >=20
-  } else if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
+  if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
     return { load, resolve }
   } else {
     return {

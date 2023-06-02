@@ -4,12 +4,11 @@
   "description": "Intercept imports in Node.js",
   "main": "index.js",
   "scripts": {
-    "test": "c8 --check-coverage --lines 85 imhotap --runner test/runtest --files test/{hook,low-level,other}/*",
-    "test:unsupported": "imhotap --runner test/runtest --files test/hook/loader.mjs",
-    "test-win": "c8 --check-coverage --lines 85 imhotap --runner test\\runtest.bat --files test/{hook,low-level,other}/*",
+    "test": "c8 --check-coverage --lines 85 imhotap --runner test/runtest --files test/{hook,low-level,other,get-esm-exports}/*",
+    "test-win": "c8 --check-coverage --lines 85 imhotap --runner test\\runtest.bat --files test/{hook,low-level,other,get-esm-exports}/*",
     "test:ts": "c8 imhotap --runner test/runtest --files test/typescript/*.test.mts",
     "test-win:ts": "c8 imhotap --runner test\\runtest.bat --files test/typescript/*.test.mts",
-    "coverage": "c8 --reporter html imhotap --runner test/runtest --files test/{hook,low-level,other}/* && echo '\nNow open coverage/index.html\n'"
+    "coverage": "c8 --reporter html imhotap --runner test/runtest --files test/{hook,low-level,other,get-esm-exports}/* && echo '\nNow open coverage/index.html\n'"
   },
   "repository": {
     "type": "git",
@@ -37,6 +36,9 @@
     "typescript": "^4.7.4"
   },
   "dependencies": {
+    "acorn": "^8.8.2",
+    "acorn-import-assertions": "^1.9.0",
+    "cjs-module-lexer": "^1.2.2",
     "module-details-from-path": "^1.0.3"
   }
 }
