@@ -120,7 +120,7 @@ function createHook (meta) {
   async function getSource (url, context, parentGetSource) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
-      const exportNames = await getExports(realUrl, context.format)
+      const exportNames = await getExports(realUrl, context, parentGetSource)
       return {
         source: `
 import { register } from '${iitmURL}'
