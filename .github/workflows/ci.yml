@@ -11,6 +11,7 @@ jobs:
     strategy:
       matrix:
         node-version: [12.x, 14.x, 16.10.0, 16.16.0, 16.17.0, 16.x, 17.x, 18.5.0, 18.x, 20.x]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v2
@@ -22,21 +23,3 @@ jobs:
       - run: npm test
       - run: npm run test:ts
         if: (matrix.node-version != '12.x' && matrix.node-version != '14.x' && matrix.node-version != '16.10.0')
-
-  build-win:
-      runs-on: windows-latest
-
-      strategy:
-        matrix:
-          node-version: [12.x, 14.x, 16.10.0, 16.16.0, 16.17.0, 16.x, 18.5.0, 18.x, 20.x]
-
-      steps:
-        - uses: actions/checkout@v2
-        - name: Use Node.js ${{ matrix.node-version }}
-          uses: actions/setup-node@v2
-          with:
-            node-version: ${{ matrix.node-version }}
-        - run: npm install
-        - run: npm run test-win
-        - run: npm run test-win:ts
-          if: (matrix.node-version != '12.x' && matrix.node-version != '14.x' && matrix.node-version != '16.10.0')
