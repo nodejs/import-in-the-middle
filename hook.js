@@ -2,6 +2,9 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
+const dc = require('diagnostics_channel')
+const sourcePreloadChannel = dc.channel('iitm:source:preload')
+
 const specifiers = new Map()
 const isWin = process.platform === "win32"
 
@@ -13,7 +16,6 @@ const NODE_MAJOR = Number(NODE_VERSION[0])
 const NODE_MINOR = Number(NODE_VERSION[1])
 
 let entrypoint
-
 if (NODE_MAJOR >= 20) {
   getExports = require('./lib/get-exports.js')
 } else {
@@ -136,7 +138,6 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
 `
       }
     }
-
     return parentGetSource(url, context, parentGetSource)
   }
 
@@ -151,7 +152,23 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
       }
     }
 
-    return parentLoad(url, context, parentLoad)
+    const parentLoadResult = await parentLoad(url, context, parentLoad)
+
+    if (parentLoadResult.source && sourcePreloadChannel.hasSubscribers) {
+      const source = parentLoadResult.source
+      const dataToPublish = {
+        source: parentLoadResult.source,
+        url
+      }
+
+      sourcePreloadChannel.publish(dataToPublish)
+
+      if (source !== dataToPublish.source) {
+        parentLoadResult.source = dataToPublish.source
+      }
+    }
+
+    return parentLoadResult
   }
 
   if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
