@@ -2,6 +2,9 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
+const fs = require('fs');
+const { fileURLToPath } = require('url')
+const astParse = require('./lib/ast-parse.js')
 const specifiers = new Map()
 const isWin = process.platform === "win32"
 
@@ -111,9 +114,9 @@ function createHook (meta) {
 
 
     specifiers.set(url.url, specifier)
-
+    
     return {
-      url: addIitm(url.url),
+      url: url.format !== 'module' ? addIitm(url.url) : url.url,
       shortCircuit: true,
       format: url.format
     }
@@ -124,7 +127,7 @@ function createHook (meta) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
       const exportNames = await getExports(realUrl, context, parentGetSource)
-      return {
+      return { 
         source: `
 import { register } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(url)}
@@ -139,6 +142,39 @@ set.${n} = (v) => {
 `).join('\n')}
 register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers.get(realUrl))})
 `
+      } 
+    }
+    else if (context.format === 'module') {
+      let fileContents
+      try {
+        fileContents = fs.readFileSync(fileURLToPath(url), 'utf8')
+      } catch (parseError) {
+        console.error(`Had trouble reading file: ${fileContents}, got error: ${parseError}`);
+        return parentGetSource(url, context, parentGetSource)
+      }      
+      try {
+        const outPut = astParse(fileContents)
+        fileContents = outPut.code
+        exportAlias = outPut.exportAlias
+      } catch (parseError) {
+        console.error(`Tried AST parsing ${realPath}, got error: ${parseError}`);
+        return parentGetSource(url, context, parentGetSource)
+      }
+      const src = `${fileContents}
+import { register } from '${iitmURL}'
+const set = {}
+const namespace = {}
+${Object.entries(exportAlias).map(([key, value]) => `
+set.${key} = (v) => {
+  ${value} = v;
+  return true;
+};
+namespace.${key} = ${value}
+`).join('\n')}
+register(${JSON.stringify(url)}, namespace, set, ${JSON.stringify(specifiers.get(url))})
+`
+      return { 
+        source: src
       }
     }
 
@@ -147,7 +183,7 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
 
   // For Node.js 16.12.0 and higher.
   async function load (url, context, parentLoad) {
-    if (hasIitm(url)) {
+    if (hasIitm(url) || context.format === 'module') {
       const { source } = await getSource(url, context, parentLoad)
       return {
         source,
@@ -167,7 +203,7 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
       resolve,
       getSource,
       getFormat (url, context, parentGetFormat) {
-        if (hasIitm(url)) {
+        if (hasIitm(url) || context.format === 'module') {
           return {
             format: 'module'
           }
