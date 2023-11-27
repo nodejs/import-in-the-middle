@@ -124,7 +124,7 @@ function createHook (meta) {
 
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   async function getSource (url, context, parentGetSource) {
-    if (hasIitm(url)) {
+    if (hasIitm(url) || NODE_MAJOR < 20) {
       const realUrl = deleteIitm(url)
       const exportNames = await getExports(realUrl, context, parentGetSource)
       return { 
