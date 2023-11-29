@@ -116,7 +116,7 @@ function createHook (meta) {
     specifiers.set(url.url, specifier)
     
     return {
-      url: url.format !== 'module' ? addIitm(url.url) : url.url,
+      url: url.format !== 'module' || NODE_MAJOR < 16 ? addIitm(url.url) : url.url,
       shortCircuit: true,
       format: url.format
     }
@@ -144,7 +144,7 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
 `
       } 
     }
-    else if (context.format === 'module') {
+    else if (context.format === 'module' && NODE_MAJOR >= 16) {
       let fileContents
       try {
         fileContents = fs.readFileSync(fileURLToPath(url), 'utf8')
