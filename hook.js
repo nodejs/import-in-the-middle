@@ -124,7 +124,7 @@ function createHook (meta) {
 
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   async function getSource (url, context, parentGetSource) {
-    if (hasIitm(url) || NODE_MAJOR < 20) {
+    if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
       const exportNames = await getExports(realUrl, context, parentGetSource)
       return { 
@@ -161,7 +161,8 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
         return parentGetSource(url, context, parentGetSource)
       }
       const src = `${fileContents}
-import { register } from '${iitmURL}'
+import { register as DATADOG_REGISTER_FUNC } from '${iitmURL}';
+{
 const set = {}
 const namespace = {}
 ${Object.entries(exportAlias).map(([key, value]) => `
@@ -171,7 +172,8 @@ set.${key} = (v) => {
 };
 namespace.${key} = ${value}
 `).join('\n')}
-register(${JSON.stringify(url)}, namespace, set, ${JSON.stringify(specifiers.get(url))})
+DATADOG_REGISTER_FUNC(${JSON.stringify(url)}, namespace, set, ${JSON.stringify(specifiers.get(url))})
+}
 `
       return { 
         source: src
