@@ -12,6 +12,7 @@ const NODE_VERSION = process.versions.node.split('.')
 const NODE_MAJOR = Number(NODE_VERSION[0])
 const NODE_MINOR = Number(NODE_VERSION[1])
 
+
 let entrypoint
 
 if (NODE_MAJOR >= 20) {
