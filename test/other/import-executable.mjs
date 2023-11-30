@@ -4,6 +4,13 @@
 
 import { rejects } from 'assert'
 (async () => {
+  const [processMajor, processMinor] = process.versions.node.split('.').map(Number)
+  const extensionlessSupported = processMajor >= 21 ||
+    (processMajor === 20 && processMinor >= 10)
+  if (extensionlessSupported) {
+    // Files without extension are supported in Node.js >= 20.10.0
+    return
+  }
   await rejects(() => import('./executable'), {
     name: 'TypeError',
     code: 'ERR_UNKNOWN_FILE_EXTENSION'

@@ -100,7 +100,11 @@ function createHook (meta) {
       return url
     }
 
-    if (context.importAssertions && context.importAssertions.type === 'json') {
+    // Node.js v21 renames importAssertions to importAttributes
+    if (
+      (context.importAssertions && context.importAssertions.type === 'json') ||
+      (context.importAttributes && context.importAttributes.type === 'json')
+    ) {
       return url
     }
 
