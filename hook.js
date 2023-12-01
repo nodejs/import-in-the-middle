@@ -11,6 +11,7 @@ const isWin = process.platform === "win32"
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
 const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
+const EXTENSION_MJS_RE = /\.mjs$/;
 const NODE_VERSION = process.versions.node.split('.')
 const NODE_MAJOR = Number(NODE_VERSION[0])
 const NODE_MINOR = Number(NODE_VERSION[1])
@@ -111,10 +112,14 @@ function createHook (meta) {
     ) {
       return url
     }
-
+    
+    // on Node 16.12.0, url.format is undefined for .mjs files, so explicitly set it to 'module'
+    if (url.format === undefined && EXTENSION_MJS_RE.test(url.url)) {
+      url.format = 'module'
+    }
 
     specifiers.set(url.url, specifier)
-    
+
     return {
       url: url.format !== 'module' || NODE_MAJOR < 16 ? addIitm(url.url) : url.url,
       shortCircuit: true,
