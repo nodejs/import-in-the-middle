@@ -6,9 +6,10 @@ import { rejects } from 'assert'
 (async () => {
   const [processMajor, processMinor] = process.versions.node.split('.').map(Number)
   const extensionlessSupported = processMajor >= 21 ||
-    (processMajor === 20 && processMinor >= 10)
+    (processMajor === 20 && processMinor >= 10) ||
+    (processMajor === 18 && processMinor >= 19)
   if (extensionlessSupported) {
-    // Files without extension are supported in Node.js >= 20.10.0
+    // Files without extension are supported in Node.js ^21, ^20.10.0, and ^18.19.0
     return
   }
   await rejects(() => import('./executable'), {
