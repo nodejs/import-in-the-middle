@@ -4,7 +4,6 @@
 
 const fs = require('fs');
 const { fileURLToPath } = require('url')
-const astParse = require('./lib/ast-parse.js')
 const specifiers = new Map()
 const isWin = process.platform === "win32"
 
@@ -23,6 +22,12 @@ if (NODE_MAJOR >= 20 || (NODE_MAJOR == 18 && NODE_MINOR >= 19)) {
   getExports = require('./lib/get-exports.js')
 } else {
   getExports = (url) => import(url).then(Object.keys)
+}
+
+if (NODE_MAJOR >= 16) {
+  astParse = require('./lib/ast-parse.js')
+} else {
+  astParse = undefined
 }
 
 function hasIitm (url) {
@@ -149,7 +154,7 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
 `
       } 
     }
-    else if (context.format === 'module' && NODE_MAJOR >= 16) {
+    else if (NODE_MAJOR >= 16 && context.format === 'module') {
       let fileContents
       try {
         fileContents = fs.readFileSync(fileURLToPath(url), 'utf8')
