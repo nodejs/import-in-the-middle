@@ -25,9 +25,9 @@ if (NODE_MAJOR >= 20 || (NODE_MAJOR == 18 && NODE_MINOR >= 19)) {
 }
 
 if (NODE_MAJOR >= 16) {
-  astParse = require('./lib/ast-parse.js')
+  getEsmExports = require('./lib/get-esm-exports.js')
 } else {
-  astParse = undefined
+  getEsmExports = undefined
 }
 
 function hasIitm (url) {
@@ -166,7 +166,7 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
         return parentGetSource(url, context, parentGetSource)
       }      
       try {
-        const outPut = astParse(fileContents, url)
+        const outPut = getEsmExports(fileContents, true, url)
         fileContents = outPut.code
         exportAlias = outPut.exportAlias
       } catch (parseError) {
