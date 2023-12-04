@@ -135,8 +135,11 @@ function createHook (meta) {
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   async function getSource (url, context, parentGetSource) {
     if (hasIitm(url)) {
+      
       const realUrl = deleteIitm(url)
+      
       const exportNames = await getExports(realUrl, context, parentGetSource)
+      
       return { 
         source: `
 import { register } from '${iitmURL}'
@@ -163,7 +166,7 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
         return parentGetSource(url, context, parentGetSource)
       }      
       try {
-        const outPut = astParse(fileContents)
+        const outPut = astParse(fileContents, url)
         fileContents = outPut.code
         exportAlias = outPut.exportAlias
       } catch (parseError) {
