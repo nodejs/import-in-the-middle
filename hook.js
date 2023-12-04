@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-const fs = require('fs');
+const fs = require('fs')
 const { fileURLToPath } = require('url')
 const specifiers = new Map()
 const isWin = process.platform === "win32"
@@ -10,7 +10,7 @@ const isWin = process.platform === "win32"
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
 const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
-const EXTENSION_MJS_RE = /\.mjs$/;
+const EXTENSION_MJS_RE = /\.mjs$/
 const NODE_VERSION = process.versions.node.split('.')
 const NODE_MAJOR = Number(NODE_VERSION[0])
 const NODE_MINOR = Number(NODE_VERSION[1])
@@ -162,7 +162,7 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
       try {
         fileContents = fs.readFileSync(fileURLToPath(url), 'utf8')
       } catch (parseError) {
-        console.error(`Had trouble reading file: ${fileContents}, got error: ${parseError}`);
+        console.error(`Had trouble reading file: ${fileContents}, got error: ${parseError}`)
         return parentGetSource(url, context, parentGetSource)
       }      
       try {
@@ -170,19 +170,19 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
         fileContents = outPut.code
         exportAlias = outPut.exportAlias
       } catch (parseError) {
-        console.error(`Tried AST parsing ${realPath}, got error: ${parseError}`);
+        console.error(`Tried AST parsing ${realPath}, got error: ${parseError}`)
         return parentGetSource(url, context, parentGetSource)
       }
       const src = `${fileContents}
-import { register as DATADOG_REGISTER_FUNC } from '${iitmURL}';
+import { register as DATADOG_REGISTER_FUNC } from '${iitmURL}'
 {
 const set = {}
 const namespace = {}
 ${Object.entries(exportAlias).map(([key, value]) => `
 set.${key} = (v) => {
-  ${value} = v;
-  return true;
-};
+  ${value} = v
+  return true
+}
 namespace.${key} = ${value}
 `).join('\n')}
 DATADOG_REGISTER_FUNC(${JSON.stringify(url)}, namespace, set, ${JSON.stringify(specifiers.get(url))})
