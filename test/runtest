@@ -13,6 +13,7 @@ process.env.NODE_NO_WARNINGS = 1
 const filename = process.argv[2]
 const args = [
   '--unhandled-rejections=strict',
+  // '--require','./test/source/utils/fill-subscription-global-source-data.js',
   ...process.argv.slice(2)
 ]
 
