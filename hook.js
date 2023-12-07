@@ -2,6 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
+const { randomBytes } = require('node:crypto')
 const specifiers = new Map()
 const isWin = process.platform === "win32"
 
@@ -77,6 +78,79 @@ function needsToAddFileProtocol(urlObj) {
   return !isFileProtocol(urlObj) && NODE_MAJOR < 18
 }
 
+/**
+ * Determines if a specifier represents an export all ESM line.
+ * Note that the expected `line` isn't 100% valid ESM. It is derived
+ * from the `getExports` function wherein we have recognized the true
+ * line and re-mapped it to one we expect.
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function isStarExportLine(line) {
+  return /^\* from /.test(line)
+}
+
+/**
+ * @typedef {object} ProcessedStarExport
+ * @property {string[]} imports A set of ESM import lines to be added to the
+ * shimmed module source.
+ * @property {string[]} namespaces A set of identifiers representing the
+ * modules in `imports`, e.g. for `import * as foo from 'bar'`, "foo" will be
+ * present in this array.
+ * @property {string[]} settings The shimmed setters for all of the exports
+ * from the `imports`.
+ */
+
+/**
+ * Processes a module that has been exported via the ESM "export all" syntax.
+ * It gets all of the exports from the designated "get all exports from" module
+ * and maps them into the shimmed setters syntax.
+ *
+ * @param {object} params
+ * @param {string} params.exportLine The text indicating the module to import,
+ * e.g. "* from foo".
+ * @param {string} params.srcUrl The full URL to the module that contains the
+ * `exportLine`.
+ * @param {object} params.context Provided by the loaders API.
+ * @param {function} parentGetSource Provides the source code for the parent
+ * module.
+ * @returns {Promise<ProcessedStarExport>}
+ */
+async function processStarExport({exportLine, srcUrl, context, parentGetSource}) {
+  const [_, modFile] = exportLine.split('* from ')
+  const modName = Buffer.from(modFile, 'hex') + Date.now() + randomBytes(4).toString('hex')
+  const modUrl = new URL(modFile, srcUrl).toString()
+  const innerExports = await getExports(modUrl, context, parentGetSource)
+
+  const imports = [`import * as $${modName} from ${JSON.stringify(modUrl)}`]
+  const namespaces = [`$${modName}`]
+  const setters = []
+  for (const n of innerExports) {
+    if (isStarExportLine(n) === true) {
+      const data = await processStarExport({
+        exportLine: n,
+        srcUrl: modUrl,
+        context,
+        parentGetSource
+      })
+      Array.prototype.push.apply(imports, data.imports)
+      Array.prototype.push.apply(namespaces, data.namespaces)
+      Array.prototype.push.apply(setters, data.setters)
+      continue
+    }
+    setters.push(`
+    let $${n} = _.${n}
+    export { $${n} as ${n} }
+    set.${n} = (v) => {
+      $${n} = v
+      return true
+    }
+    `)
+  }
+
+  return { imports, namespaces, setters }
+}
 
 function addIitm (url) {
   const urlObj = new URL(url)
@@ -127,33 +201,23 @@ function createHook (meta) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
       const exportNames = await getExports(realUrl, context, parentGetSource)
-      const isExportAllLine = /^\* from /
       const setters = []
+
       for (const n of exportNames) {
-        if (isExportAllLine.test(n) === true) {
+        if (isStarExportLine(n) === true) {
           // Encountered a `export * from 'module'` line. Thus, we need to
           // get all exports from the specified module and shim them into the
           // current module.
-          const [_, modFile] = n.split('* from ')
-          const modName = Buffer.from(modFile, 'hex') + Date.now()
-          const modUrl = new URL(modFile, url).toString()
-          const innerExports = await getExports(modUrl, context, parentGetSource)
-          const innerSetters = []
+          const data = await processStarExport({
+            exportLine: n,
+            srcUrl: url,
+            context,
+            parentGetSource
+          })
+          Array.prototype.push.apply(imports, data.imports)
+          Array.prototype.push.apply(namespaceIds, data.namespaces)
+          Array.prototype.push.apply(setters, data.setters)
 
-          for (const _n of innerExports) {
-            innerSetters.push(`
-            let $${_n} = _.${_n}
-            export { $${_n} as ${_n} }
-            set.${_n} = (v) => {
-              $${_n} = v
-              return true
-            }
-            `)
-          }
-
-          imports.push(`import * as $${modName} from ${JSON.stringify(modUrl)}`)
-          namespaceIds.push(`$${modName}`)
-          setters.push(innerSetters.join('\n'))
           continue
         }
 

@@ -8,13 +8,14 @@ Hook((exports, name) => {
     return bar() + '-wrapped'
   }
 
-  const sayName = exports.sayName
-  exports.sayName = function wrappedSayName() {
-    return `Bastion: "${sayName()}"`
+  const aFunc = exports.aFunc
+  exports.aFunc = function wrappedAFunc() {
+    return aFunc() + '-wrapped'
   }
 })
 
-import { default as bar, sayName } from '../fixtures/bundle.mjs'
+import { default as bar, aFunc, baz } from '../fixtures/bundle.mjs'
 
 strictEqual(bar(), '42-wrapped')
-strictEqual(sayName(), 'Bastion: "Moon Child"')
+strictEqual(aFunc(), 'a-wrapped')
+strictEqual(baz(), 'baz')
