@@ -121,23 +121,63 @@ function createHook (meta) {
 
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   async function getSource (url, context, parentGetSource) {
+    const imports = []
+    const namespaceIds = []
+
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
       const exportNames = await getExports(realUrl, context, parentGetSource)
+      const isExportAllLine = /^\* from /
+      const setters = []
+      for (const n of exportNames) {
+        if (isExportAllLine.test(n) === true) {
+          // Encountered a `export * from 'module'` line. Thus, we need to
+          // get all exports from the specified module and shim them into the
+          // current module.
+          const [_, modFile] = n.split('* from ')
+          const modName = Buffer.from(modFile, 'hex') + Date.now()
+          const modUrl = new URL(modFile, url).toString()
+          const innerExports = await getExports(modUrl, context, parentGetSource)
+          const innerSetters = []
+
+          for (const _n of innerExports) {
+            innerSetters.push(`
+            let $${_n} = _.${_n}
+            export { $${_n} as ${_n} }
+            set.${_n} = (v) => {
+              $${_n} = v
+              return true
+            }
+            `)
+          }
+
+          imports.push(`import * as $${modName} from ${JSON.stringify(modUrl)}`)
+          namespaceIds.push(`$${modName}`)
+          setters.push(innerSetters.join('\n'))
+          continue
+        }
+
+        setters.push(`
+        let $${n} = _.${n}
+        export { $${n} as ${n} }
+        set.${n} = (v) => {
+          $${n} = v
+          return true
+        }
+        `)
+      }
+
       return {
         source: `
 import { register } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(url)}
+${imports.join('\n')}
+
+const _ = Object.assign({}, ...[namespace, ${namespaceIds.join(', ')}])
 const set = {}
-${exportNames.map((n) => `
-let $${n} = namespace.${n}
-export { $${n} as ${n} }
-set.${n} = (v) => {
-  $${n} = v
-  return true
-}
-`).join('\n')}
-register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers.get(realUrl))})
+
+${setters.join('\n')}
+register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(realUrl))})
 `
       }
     }
