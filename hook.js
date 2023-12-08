@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-const { randomBytes } = require('node:crypto')
+const { randomBytes } = require('crypto')
 const specifiers = new Map()
 const isWin = process.platform === "win32"
 
