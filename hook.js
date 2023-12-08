@@ -11,11 +11,15 @@ const isWin = process.platform === "win32"
 // way of supporting arbitrary extensions
 const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
 const EXTENSION_MJS_RE = /\.mjs$/
+const EXTENSION_JS_RE = /\.js$/
 const NODE_VERSION = process.versions.node.split('.')
 const NODE_MAJOR = Number(NODE_VERSION[0])
 const NODE_MINOR = Number(NODE_VERSION[1])
 
 let entrypoint
+let getExports
+let getEsmExports
+let getPkgJsonTypeModule
 
 let getExports
 if (NODE_MAJOR >= 20 || (NODE_MAJOR == 18 && NODE_MINOR >= 19)) {
@@ -26,8 +30,10 @@ if (NODE_MAJOR >= 20 || (NODE_MAJOR == 18 && NODE_MINOR >= 19)) {
 
 if (NODE_MAJOR >= 16) {
   getEsmExports = require('./lib/get-esm-exports.js')
+  getPkgJsonTypeModule = require('./lib/get-pkg-json-type-module.js')
 } else {
   getEsmExports = undefined
+  getPkgJsonTypeModule = undefined
 }
 
 function hasIitm (url) {
@@ -118,9 +124,15 @@ function createHook (meta) {
       return url
     }
     
-    // on Node 16.12.0, url.format is undefined for .mjs files, so explicitly set it to 'module'
-    if (url.format === undefined && EXTENSION_MJS_RE.test(url.url)) {
-      url.format = 'module'
+    // on Node's 16.0.0-16.12.0, url.format is undefined for the cyclical dependency test files ./test/fixtures/a.mjs & ./test/fixtures/b.mjs 
+    // so explicitly set format to 'module' for files with a .mjs extension so that they can go through the ast parsing patch for Node >= 16
+    if (NODE_MAJOR === 16 && NODE_MINOR < 13) {
+      if (
+        (url.format === undefined && EXTENSION_MJS_RE.test(url.url)) || 
+        (EXTENSION_JS_RE.test(url.url) && getPkgJsonTypeModule(fileURLToPath(url.url)))
+      ) {
+        url.format = 'module'
+      }
     }
 
     specifiers.set(url.url, specifier)
@@ -156,8 +168,7 @@ set.${n} = (v) => {
 register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers.get(realUrl))})
 `
       } 
-    }
-    else if (NODE_MAJOR >= 16 && context.format === 'module') {
+    } else if (NODE_MAJOR >= 16 && context.format === 'module') {
       let fileContents
       try {
         fileContents = fs.readFileSync(fileURLToPath(url), 'utf8')
@@ -176,14 +187,14 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
       const src = `${fileContents}
 import { register as DATADOG_REGISTER_FUNC } from '${iitmURL}'
 {
-const set = {}
-const namespace = {}
-${Object.entries(exportAlias).map(([key, value]) => `
-set.${key} = (v) => {
-  ${value} = v
-  return true
-}
-namespace.${key} = ${value}
+  const set = {}
+  const namespace = {}
+  ${Object.entries(exportAlias).map(([key, value]) => `
+  set.${key} = (v) => {
+    ${value} = v
+    return true
+  }
+  namespace.${key} = ${value}
 `).join('\n')}
 DATADOG_REGISTER_FUNC(${JSON.stringify(url)}, namespace, set, ${JSON.stringify(specifiers.get(url))})
 }
@@ -218,6 +229,7 @@ DATADOG_REGISTER_FUNC(${JSON.stringify(url)}, namespace, set, ${JSON.stringify(s
       resolve,
       getSource,
       getFormat (url, context, parentGetFormat) {
+        console.log(777, url, context, parentGetFormat)
         if (hasIitm(url) || context.format === 'module') {
           return {
             format: 'module'
