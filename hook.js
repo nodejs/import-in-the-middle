@@ -14,7 +14,8 @@ const NODE_MINOR = Number(NODE_VERSION[1])
 
 let entrypoint
 
-if (NODE_MAJOR >= 20) {
+let getExports
+if (NODE_MAJOR >= 20 || (NODE_MAJOR == 18 && NODE_MINOR >= 19)) {
   getExports = require('./lib/get-exports.js')
 } else {
   getExports = (url) => import(url).then(Object.keys)
