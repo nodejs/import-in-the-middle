@@ -3,17 +3,18 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
 import Hook from '../../index.js'
-import { name1 as n1,
-   name2 as n2, 
-   name3 as n3, 
-   name4 as n4, 
-   functionName as fn, 
-   ClassName as cn, 
-   generatorFunctionName as gfn, 
-   name5 as n5, 
-   bar as n6, 
-   name7 as n7, 
-   name8 as n8
+import {
+  name1 as n1,
+  name2 as n2, 
+  name3 as n3, 
+  name4 as n4, 
+  functionName as fn, 
+  ClassName as cn, 
+  generatorFunctionName as gfn, 
+  name5 as n5, 
+  bar as n6, 
+  name7 as n7, 
+  name8 as n8
   } from '../fixtures/export-types/declarations.mjs'
 import { strictEqual } from 'assert'
 

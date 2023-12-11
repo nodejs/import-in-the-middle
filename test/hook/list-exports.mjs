@@ -3,12 +3,13 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
 import Hook from '../../index.js'
-import n, { name1 as n1,
-   name2 as n2, 
-   name3 as n3, 
-   name4 as n4, 
-   name5 as n5, 
-   "name" as n6,
+import n, {
+  name1 as n1,
+  name2 as n2, 
+  name3 as n3, 
+  name4 as n4, 
+  name5 as n5, 
+  "name" as n6,
   } from '../fixtures/export-types/list.mjs'
 import { strictEqual } from 'assert'
 

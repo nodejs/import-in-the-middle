@@ -6,6 +6,7 @@ const fs = require('fs')
 const { fileURLToPath } = require('url')
 const specifiers = new Map()
 const isWin = process.platform === "win32"
+const warn = require('./lib/helpers')
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
@@ -15,6 +16,7 @@ const EXTENSION_JS_RE = /\.js$/
 const NODE_VERSION = process.versions.node.split('.')
 const NODE_MAJOR = Number(NODE_VERSION[0])
 const NODE_MINOR = Number(NODE_VERSION[1])
+const FILE_NAME = 'hook.js'
 
 let entrypoint
 let getExports
@@ -173,7 +175,7 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
       try {
         fileContents = fs.readFileSync(fileURLToPath(url), 'utf8')
       } catch (parseError) {
-        console.error(`Had trouble reading file: ${fileContents}, got error: ${parseError}`)
+        warn(`Had trouble reading file: ${fileContents}, got error: ${parseError}`, FILE_NAME)
         return parentGetSource(url, context, parentGetSource)
       }      
       try {
@@ -181,7 +183,7 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
         fileContents = outPut.code
         exportAlias = outPut.exportAlias
       } catch (parseError) {
-        console.error(`Tried AST parsing ${realPath}, got error: ${parseError}`)
+        warn(`Tried AST parsing ${realPath}, got error: ${parseError}`, FILE_NAME)
         return parentGetSource(url, context, parentGetSource)
       }
       const src = `${fileContents}

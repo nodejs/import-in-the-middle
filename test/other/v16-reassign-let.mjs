@@ -5,7 +5,12 @@
 import { spawn } from 'child_process'
 import { strictEqual } from 'assert'
 
-const nodeProcess = spawn('node', ['--loader', './hook.mjs', './test/fixtures/reassign-let.mjs'])
+const nodeProcess = spawn('node', [
+  '--loader', 
+  './hook.mjs', 
+  './test/fixtures/reassign-let.mjs'
+])
+
 const expectedOutput = 'setting env, env.FOO is bar\nusing env from another module, env.FOO is bar'
 let stdout = ''
 let stderr = ''
