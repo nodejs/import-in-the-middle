@@ -23,7 +23,6 @@ let getExports
 let getEsmExports
 let getPkgJsonTypeModule
 
-let getExports
 if (NODE_MAJOR >= 20 || (NODE_MAJOR == 18 && NODE_MINOR >= 19)) {
   getExports = require('./lib/get-exports.js')
 } else {
@@ -172,8 +171,9 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
       } 
     } else if (NODE_MAJOR >= 16 && context.format === 'module') {
       let fileContents
+      const realPath = fileURLToPath(url)
       try {
-        fileContents = fs.readFileSync(fileURLToPath(url), 'utf8')
+        fileContents = fs.readFileSync(realPath, 'utf8')
       } catch (parseError) {
         warn(`Had trouble reading file: ${fileContents}, got error: ${parseError}`, FILE_NAME)
         return parentGetSource(url, context, parentGetSource)
@@ -231,7 +231,6 @@ DATADOG_REGISTER_FUNC(${JSON.stringify(url)}, namespace, set, ${JSON.stringify(s
       resolve,
       getSource,
       getFormat (url, context, parentGetFormat) {
-        console.log(777, url, context, parentGetFormat)
         if (hasIitm(url) || context.format === 'module') {
           return {
             format: 'module'

@@ -14,7 +14,11 @@ import {
   name5 as n5, 
   bar as n6, 
   name7 as n7, 
-  name8 as n8
+  name8 as n8,
+  asyncFunctionName as afn,
+  asyncGeneratorFunctionName as agfn,
+  arrowFunction as arfn,
+  asyncArrowFunction as aarfn,
   } from '../fixtures/export-types/declarations.mjs'
 import { strictEqual } from 'assert'
 
@@ -39,6 +43,24 @@ Hook((exports, name) => {
     exports.bar += 1
     exports.name7 += 1
     exports.name8 += 1
+    const asyncOrig = exports.asyncFunctionName
+    exports.asyncFunctionName = async function () {
+      return await asyncOrig() + 1
+    }
+    const asyncOrig2 = exports.asyncGeneratorFunctionName
+    exports.asyncGeneratorFunctionName = async function* () {
+      for await (const value of asyncOrig2()) {
+        yield value + 1;
+      }
+    }
+    const arrowOrig = exports.arrowFunction
+    exports.arrowFunction = () => {
+      return arrowOrig() + 1
+    }
+    const asyncArrowOrig = exports.asyncArrowFunction
+    exports.asyncArrowFunction = async () => {
+      return await asyncArrowOrig() + 1
+    }
   }
 })
 
@@ -53,3 +75,10 @@ strictEqual(n5, 2)
 strictEqual(n6, 2)
 strictEqual(n7, 2)
 strictEqual(n8, 2)
+strictEqual(await afn(), 2)
+for await (const value of agfn()) {
+  strictEqual(value, 2)
+}
+strictEqual(arfn(), 2)
+strictEqual(await aarfn(), 2)
+

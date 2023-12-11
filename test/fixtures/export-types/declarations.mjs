@@ -9,3 +9,11 @@ export class ClassName { getFoo() { return 1 } }
 export function* generatorFunctionName() { return 1 }
 export const { name5, name6: bar } = o;
 export const [ name7, name8 ] = array;
+export async function asyncFunctionName() { return 1 }
+export async function* asyncGeneratorFunctionName() { yield 1 }
+export const arrowFunction = () => {
+  return 1;
+}
+export const asyncArrowFunction = async () => {
+  return 1;
+}
