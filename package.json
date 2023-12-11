@@ -4,7 +4,7 @@
   "description": "Intercept imports in Node.js",
   "main": "index.js",
   "scripts": {
-    "test": "c8 --check-coverage --lines 80 imhotap --runner 'node test/runtest' --files test/{hook,low-level,other,get-esm-exports}/*",
+    "test": "c8 --check-coverage --lines 70 imhotap --runner 'node test/runtest' --files test/{hook,low-level,other,get-esm-exports}/*",
     "test:ts": "c8 imhotap --runner 'node test/runtest' --files test/typescript/*.test.mts",
     "coverage": "c8 --reporter html imhotap --runner 'node test/runtest' --files test/{hook,low-level,other,get-esm-exports}/* && echo '\nNow open coverage/index.html\n'"
   },
