@@ -163,6 +163,9 @@ ${exportNames.map((n) => `
 let $${n} = namespace.${n}
 export { $${n} as ${n} }
 set.${n} = (v) => {
+  if ('${n}' !== 'default' && namespace.default['${n}']) {
+    namespace.default['${n}'] = v
+  }
   $${n} = v
   return true
 }
