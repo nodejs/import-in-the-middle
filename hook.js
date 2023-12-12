@@ -92,53 +92,50 @@ function isStarExportLine(line) {
 }
 
 /**
- * @typedef {object} ProcessedStarExport
+ * @typedef {object} ProcessedModule
  * @property {string[]} imports A set of ESM import lines to be added to the
  * shimmed module source.
  * @property {string[]} namespaces A set of identifiers representing the
  * modules in `imports`, e.g. for `import * as foo from 'bar'`, "foo" will be
  * present in this array.
- * @property {string[]} settings The shimmed setters for all of the exports
- * from the `imports`.
+ * @property {string[]} setters The shimmed setters for all the exports
+ * from the module and any transitive export all modules.
  */
 
 /**
- * Processes a module that has been exported via the ESM "export all" syntax.
- * It gets all of the exports from the designated "get all exports from" module
- * and maps them into the shimmed setters syntax.
+ * Processes a module's exports and builds a set of new import statements,
+ * namespace names, and setter blocks. If an export all export if encountered,
+ * the target exports will be hoisted to the current module via a generated
+ * namespace.
  *
  * @param {object} params
- * @param {string} params.exportLine The text indicating the module to import,
- * e.g. "* from foo".
- * @param {string} params.srcUrl The full URL to the module that contains the
- * `exportLine`.
+ * @param {string} params.srcUrl The full URL to the module to process.
  * @param {object} params.context Provided by the loaders API.
  * @param {function} parentGetSource Provides the source code for the parent
  * module.
- * @returns {Promise<ProcessedStarExport>}
+ * @returns {Promise<ProcessedModule>}
  */
-async function processStarExport({exportLine, srcUrl, context, parentGetSource}) {
-  const [_, modFile] = exportLine.split('* from ')
-  const modName = Buffer.from(modFile, 'hex') + Date.now() + randomBytes(4).toString('hex')
-  const modUrl = new URL(modFile, srcUrl).toString()
-  const innerExports = await getExports(modUrl, context, parentGetSource)
-
-  const imports = [`import * as $${modName} from ${JSON.stringify(modUrl)}`]
-  const namespaces = [`$${modName}`]
+async function processModule({ srcUrl, context, parentGetSource }) {
+  const exportNames = await getExports(srcUrl, context, parentGetSource)
+  const imports = [`import * as namespace from ${JSON.stringify(srcUrl)}`]
+  const namespaces = ['namespace']
   const setters = []
-  for (const n of innerExports) {
+
+  for (const n of exportNames) {
     if (isStarExportLine(n) === true) {
-      const data = await processStarExport({
-        exportLine: n,
-        srcUrl: modUrl,
-        context,
-        parentGetSource
-      })
-      Array.prototype.push.apply(imports, data.imports)
-      Array.prototype.push.apply(namespaces, data.namespaces)
+      const [_, modFile] = n.split('* from ')
+      const modUrl = new URL(modFile, srcUrl).toString()
+      const modName = Buffer.from(modFile, 'hex') + Date.now() + randomBytes(4).toString('hex')
+
+      imports.push(`import * as $${modName} from ${JSON.stringify(modUrl)}`)
+      namespaces.push(`$${modName}`)
+
+      const data = await processModule({ srcUrl: modUrl, context, parentGetSource })
       Array.prototype.push.apply(setters, data.setters)
+
       continue
     }
+
     setters.push(`
     let $${n} = _.${n}
     export { $${n} as ${n} }
@@ -195,49 +192,20 @@ function createHook (meta) {
 
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   async function getSource (url, context, parentGetSource) {
-    const imports = []
-    const namespaceIds = []
-
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
-      const exportNames = await getExports(realUrl, context, parentGetSource)
-      const setters = []
-
-      for (const n of exportNames) {
-        if (isStarExportLine(n) === true) {
-          // Encountered a `export * from 'module'` line. Thus, we need to
-          // get all exports from the specified module and shim them into the
-          // current module.
-          const data = await processStarExport({
-            exportLine: n,
-            srcUrl: url,
-            context,
-            parentGetSource
-          })
-          Array.prototype.push.apply(imports, data.imports)
-          Array.prototype.push.apply(namespaceIds, data.namespaces)
-          Array.prototype.push.apply(setters, data.setters)
-
-          continue
-        }
-
-        setters.push(`
-        let $${n} = _.${n}
-        export { $${n} as ${n} }
-        set.${n} = (v) => {
-          $${n} = v
-          return true
-        }
-        `)
-      }
+      const { imports, namespaces, setters } = await processModule({
+          srcUrl: realUrl,
+          context,
+          parentGetSource
+      })
 
       return {
         source: `
 import { register } from '${iitmURL}'
-import * as namespace from ${JSON.stringify(url)}
 ${imports.join('\n')}
 
-const _ = Object.assign({}, ...[namespace, ${namespaceIds.join(', ')}])
+const _ = Object.assign({}, ...[${namespaces.join(', ')}])
 const set = {}
 
 ${setters.join('\n')}
