@@ -126,7 +126,8 @@ function createHook (meta) {
     }
     
     // on Node's 16.0.0-16.12.0, url.format is undefined for the cyclical dependency test files ./test/fixtures/a.mjs & ./test/fixtures/b.mjs 
-    // so explicitly set format to 'module' for files with a .mjs extension so that they can go through the ast parsing patch for Node >= 16
+    // so explicitly set format to 'module' for files with a .mjs extension or cjs files that have type 'module in their package.json
+    // so that they can go through the ast parsing patch for Node >= 16
     if (NODE_MAJOR === 16 && NODE_MINOR < 13) {
       if (
         (url.format === undefined && EXTENSION_MJS_RE.test(url.url)) || 
