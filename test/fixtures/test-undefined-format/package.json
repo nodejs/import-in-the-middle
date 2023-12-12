@@ -1,0 +1,9 @@
+{
+  "name": "test-v16.12-undefined-format",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test-undefined-format": "node --loader ../../../hook.mjs ./a.js"
+  },
+  "dependencies": {}
+}
