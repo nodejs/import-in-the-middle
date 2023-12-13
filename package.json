@@ -4,7 +4,7 @@
   "description": "Intercept imports in Node.js",
   "main": "index.js",
   "scripts": {
-    "test": "c8 --check-coverage --lines 70 imhotap --runner 'node test/runtest' --files test/{hook,low-level,other,get-esm-exports}/*",
+    "test": "c8 --check-coverage --lines 85 imhotap --runner 'node test/runtest' --files test/{hook,low-level,other,get-esm-exports}/*",
     "test:ts": "c8 imhotap --runner 'node test/runtest' --files test/typescript/*.test.mts",
     "coverage": "c8 --reporter html imhotap --runner 'node test/runtest' --files test/{hook,low-level,other,get-esm-exports}/* && echo '\nNow open coverage/index.html\n'"
   },
@@ -34,11 +34,9 @@
     "typescript": "^4.7.4"
   },
   "dependencies": {
-    "@babel/parser": "^7.23.5",
-    "acorn": "^8.11.2",
+    "acorn": "^8.8.2",
     "acorn-import-assertions": "^1.9.0",
     "cjs-module-lexer": "^1.2.2",
-    "module-details-from-path": "^1.0.3",
-    "recast": "^0.23.4"
+    "module-details-from-path": "^1.0.3"
   }
 }
