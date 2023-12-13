@@ -2,6 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
+const { randomBytes } = require('crypto')
 const specifiers = new Map()
 const isWin = process.platform === "win32"
 
@@ -77,6 +78,76 @@ function needsToAddFileProtocol(urlObj) {
   return !isFileProtocol(urlObj) && NODE_MAJOR < 18
 }
 
+/**
+ * Determines if a specifier represents an export all ESM line.
+ * Note that the expected `line` isn't 100% valid ESM. It is derived
+ * from the `getExports` function wherein we have recognized the true
+ * line and re-mapped it to one we expect.
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function isStarExportLine(line) {
+  return /^\* from /.test(line)
+}
+
+/**
+ * @typedef {object} ProcessedModule
+ * @property {string[]} imports A set of ESM import lines to be added to the
+ * shimmed module source.
+ * @property {string[]} namespaces A set of identifiers representing the
+ * modules in `imports`, e.g. for `import * as foo from 'bar'`, "foo" will be
+ * present in this array.
+ * @property {string[]} setters The shimmed setters for all the exports
+ * from the module and any transitive export all modules.
+ */
+
+/**
+ * Processes a module's exports and builds a set of new import statements,
+ * namespace names, and setter blocks. If an export all export if encountered,
+ * the target exports will be hoisted to the current module via a generated
+ * namespace.
+ *
+ * @param {object} params
+ * @param {string} params.srcUrl The full URL to the module to process.
+ * @param {object} params.context Provided by the loaders API.
+ * @param {function} parentGetSource Provides the source code for the parent
+ * module.
+ * @returns {Promise<ProcessedModule>}
+ */
+async function processModule({ srcUrl, context, parentGetSource }) {
+  const exportNames = await getExports(srcUrl, context, parentGetSource)
+  const imports = [`import * as namespace from ${JSON.stringify(srcUrl)}`]
+  const namespaces = ['namespace']
+  const setters = []
+
+  for (const n of exportNames) {
+    if (isStarExportLine(n) === true) {
+      const [_, modFile] = n.split('* from ')
+      const modUrl = new URL(modFile, srcUrl).toString()
+      const modName = Buffer.from(modFile, 'hex') + Date.now() + randomBytes(4).toString('hex')
+
+      imports.push(`import * as $${modName} from ${JSON.stringify(modUrl)}`)
+      namespaces.push(`$${modName}`)
+
+      const data = await processModule({ srcUrl: modUrl, context, parentGetSource })
+      Array.prototype.push.apply(setters, data.setters)
+
+      continue
+    }
+
+    setters.push(`
+    let $${n} = _.${n}
+    export { $${n} as ${n} }
+    set.${n} = (v) => {
+      $${n} = v
+      return true
+    }
+    `)
+  }
+
+  return { imports, namespaces, setters }
+}
 
 function addIitm (url) {
   const urlObj = new URL(url)
@@ -123,21 +194,22 @@ function createHook (meta) {
   async function getSource (url, context, parentGetSource) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
-      const exportNames = await getExports(realUrl, context, parentGetSource)
+      const { imports, namespaces, setters } = await processModule({
+          srcUrl: realUrl,
+          context,
+          parentGetSource
+      })
+
       return {
         source: `
 import { register } from '${iitmURL}'
-import * as namespace from ${JSON.stringify(url)}
+${imports.join('\n')}
+
+const _ = Object.assign({}, ...[${namespaces.join(', ')}])
 const set = {}
-${exportNames.map((n) => `
-let $${n} = namespace.${n}
-export { $${n} as ${n} }
-set.${n} = (v) => {
-  $${n} = v
-  return true
-}
-`).join('\n')}
-register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers.get(realUrl))})
+
+${setters.join('\n')}
+register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(realUrl))})
 `
       }
     }
