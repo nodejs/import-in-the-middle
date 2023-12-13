@@ -62,7 +62,7 @@ jobs:
           sudo apt install -y lcov
       - name: Combine all coverage data
         run: |
-          find . -type f -name '*.info' -exec echo -a {} \; | xargs --verbose lcov -o all_lcov.info"
+          find . -type f -name '*.info' -exec echo -a {} \; | xargs --verbose lcov -o all_lcov.info
       - name: Report
         run: >
           lcov --summary all_lcov.info
