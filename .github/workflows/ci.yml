@@ -63,7 +63,7 @@ jobs:
       - name: Combine all coverage data
         run: |
           find . -type f -name '*.info' | xargs -I % -- echo "-a %" | xargs bash -c "echo lcov -a \$@ -o all_lcov.info"
-          find . -type f -name '*.info' | xargs -I % -- echo "-a %" | xargs bash -c "lcov -a \$@ -o all_lcov.info"
+          find . -type f -name '*.info' -exec echo -a {} \; | xargs lcov -o all_lcov.info"
       - name: Report
         run: >
           lcov --summary all_lcov.info
