@@ -12,26 +12,26 @@ const {
   toHook
 } = require('./lib/register')
 
-function addHook(hook) {
+function addHook (hook) {
   importHooks.push(hook)
   toHook.forEach(([name, namespace]) => hook(name, namespace))
 }
 
-function removeHook(hook) {
+function removeHook (hook) {
   const index = importHooks.indexOf(hook)
   if (index > -1) {
     importHooks.splice(index, 1)
   }
 }
 
-function callHookFn(hookFn, namespace, name, baseDir) {
+function callHookFn (hookFn, namespace, name, baseDir) {
   const newDefault = hookFn(namespace, name, baseDir)
   if (newDefault && newDefault !== namespace) {
     namespace.default = newDefault
   }
 }
 
-function Hook(modules, options, hookFn) {
+function Hook (modules, options, hookFn) {
   if ((this instanceof Hook) === false) return new Hook(modules, options, hookFn)
   if (typeof modules === 'function') {
     hookFn = modules

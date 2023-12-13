@@ -4,7 +4,7 @@
 
 const { randomBytes } = require('crypto')
 const specifiers = new Map()
-const isWin = process.platform === "win32"
+const isWin = process.platform === 'win32'
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
@@ -16,7 +16,7 @@ const NODE_MINOR = Number(NODE_VERSION[1])
 let entrypoint
 
 let getExports
-if (NODE_MAJOR >= 20 || (NODE_MAJOR == 18 && NODE_MINOR >= 19)) {
+if (NODE_MAJOR >= 20 || (NODE_MAJOR === 18 && NODE_MINOR >= 19)) {
   getExports = require('./lib/get-exports.js')
 } else {
   getExports = (url) => import(url).then(Object.keys)
@@ -56,10 +56,6 @@ function deleteIitm (url) {
   return resultUrl
 }
 
-function isNode16AndBiggerOrEqualsThan16_17_0() {
-  return NODE_MAJOR === 16 && NODE_MINOR >= 17
-}
-
 function isFileProtocol (urlObj) {
   return urlObj.protocol === 'file:'
 }
@@ -68,11 +64,11 @@ function isNodeProtocol (urlObj) {
   return urlObj.protocol === 'node:'
 }
 
-function needsToAddFileProtocol(urlObj) {
+function needsToAddFileProtocol (urlObj) {
   if (NODE_MAJOR === 17) {
     return !isFileProtocol(urlObj)
   }
-  if (isNode16AndBiggerOrEqualsThan16_17_0()) {
+  if (NODE_MAJOR === 16 && NODE_MINOR >= 17) {
     return !isFileProtocol(urlObj) && !isNodeProtocol(urlObj)
   }
   return !isFileProtocol(urlObj) && NODE_MAJOR < 18
@@ -87,7 +83,7 @@ function needsToAddFileProtocol(urlObj) {
  * @param {string} line
  * @returns {boolean}
  */
-function isStarExportLine(line) {
+function isStarExportLine (line) {
   return /^\* from /.test(line)
 }
 
@@ -115,7 +111,7 @@ function isStarExportLine(line) {
  * module.
  * @returns {Promise<ProcessedModule>}
  */
-async function processModule({ srcUrl, context, parentGetSource }) {
+async function processModule ({ srcUrl, context, parentGetSource }) {
   const exportNames = await getExports(srcUrl, context, parentGetSource)
   const imports = [`import * as namespace from ${JSON.stringify(srcUrl)}`]
   const namespaces = ['namespace']
@@ -180,7 +176,6 @@ function createHook (meta) {
       return url
     }
 
-
     specifiers.set(url.url, specifier)
 
     return {
@@ -195,9 +190,9 @@ function createHook (meta) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
       const { imports, namespaces, setters } = await processModule({
-          srcUrl: realUrl,
-          context,
-          parentGetSource
+        srcUrl: realUrl,
+        context,
+        parentGetSource
       })
 
       return {
