@@ -10,7 +10,7 @@ import { strictEqual } from 'assert'
 addHook((name, exports) => {
   if (name.match(/something\.m?js/)) {
     const orig = exports.default
-    exports.default = function bar() {
+    exports.default = function bar () {
       return orig() + 15
     }
   }

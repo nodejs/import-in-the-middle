@@ -5,22 +5,22 @@
 import Hook from '../../index.js'
 import {
   name1 as n1,
-  name2 as n2, 
-  name3 as n3, 
+  name2 as n2,
+  name3 as n3,
   name4 as n4,
-  ClassName as cn, 
-  generatorFunctionName as gfn, 
-  name5 as n5, 
-  bar as n6, 
-  name7 as n7, 
+  ClassName as cn,
+  generatorFunctionName as gfn,
+  name5 as n5,
+  bar as n6,
+  name7 as n7,
   name8 as n8,
   asyncFunctionName as afn,
   asyncGeneratorFunctionName as agfn,
   arrowFunction as arfn,
-  asyncArrowFunction as aarfn,
-  } from '../fixtures/export-types/declarations.mjs'
+  asyncArrowFunction as aarfn
+  , functionName
+} from '../fixtures/export-types/declarations.mjs'
 import { strictEqual } from 'assert'
-import { functionName } from '../fixtures/export-types/declarations.mjs'
 
 Hook((exports, name) => {
   if (name.match(/declarations\.m?js/)) {
@@ -36,7 +36,7 @@ Hook((exports, name) => {
       return 2
     }
     const orig2 = exports.generatorFunctionName
-    exports.generatorFunctionName = function* () {
+    exports.generatorFunctionName = function * () {
       return orig2().next().value + 1
     }
     exports.name5 += 1
@@ -48,9 +48,9 @@ Hook((exports, name) => {
       return await asyncOrig() + 1
     }
     const asyncOrig2 = exports.asyncGeneratorFunctionName
-    exports.asyncGeneratorFunctionName = async function* () {
+    exports.asyncGeneratorFunctionName = async function * () {
       for await (const value of asyncOrig2()) {
-        yield value + 1;
+        yield value + 1
       }
     }
     const arrowOrig = exports.arrowFunction
@@ -69,6 +69,7 @@ strictEqual(n2, 2)
 strictEqual(n3, 2)
 strictEqual(n4, 2)
 strictEqual(functionName(), 2)
+/* eslint-disable new-cap */
 strictEqual(new cn().getFoo(), 2)
 strictEqual(gfn().next().value, 2)
 strictEqual(n5, 2)

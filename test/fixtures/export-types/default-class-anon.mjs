@@ -1,1 +1,1 @@
-export default class { getFoo() { return 1 } }
+export default class { getFoo () { return 1 } }

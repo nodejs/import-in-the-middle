@@ -1,5 +1,5 @@
 export const b = 'b'
 
-export function bFunc() {
+export function bFunc () {
   return b
 }

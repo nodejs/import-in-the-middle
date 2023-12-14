@@ -7,12 +7,12 @@ const makeNext = (loader, fnName, parentResolveOrLoad) => {
   }
 }
 
-export async function resolve(specifier, context, defaultResolve) {
+export async function resolve (specifier, context, defaultResolve) {
   const next = makeNext(tsNode, 'resolve', defaultResolve)
   return iitm.resolve(specifier, context, next)
 }
 
-export async function load(url, context, defaultLoad) {
-  let next = makeNext(tsNode, 'load', defaultLoad)
+export async function load (url, context, defaultLoad) {
+  const next = makeNext(tsNode, 'load', defaultLoad)
   return iitm.load(url, context, next)
 }

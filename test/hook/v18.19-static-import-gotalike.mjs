@@ -14,6 +14,8 @@ Hook((exports, name) => {
   }
 })
 
+/* eslint-disable import/no-named-default */
+/* eslint-disable camelcase */
 import {
   default as Got,
   something,
@@ -26,7 +28,7 @@ strictEqual(something(), '42-wrapped')
 const got = new Got()
 strictEqual(got.foo, 'foo')
 
-const dc = new DefaultClass
+const dc = new DefaultClass()
 strictEqual(dc.value, 'DefaultClass')
 
 strictEqual(snake_case, 'snake_case')
