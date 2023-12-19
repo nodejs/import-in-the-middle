@@ -8,13 +8,12 @@ import { strictEqual } from 'assert'
 const nodeProcess = spawn('node', [
   '--loader', 
   './hook.mjs', 
-  './test/fixtures/a.mjs'
+  './test/fixtures/cyclical-a.mjs'
 ])
 
-// expected output is 'testB\ntestA' but the actual output of this test is '' because
-// the hook fails when running against files with cylical dependencies
+// expected output should be 'testB\ntestA' but the hook fails when running against files 
+// with cylical dependencies
 const expectedOutput = 'testB\ntestA'
-const actualOutput = ''
 let stdout = ''
 let stderr = ''
 
@@ -27,6 +26,6 @@ nodeProcess.stderr.on('data', (data) => {
 });
 
 nodeProcess.on('close', (code) => {
-  strictEqual(stderr, '', 'There should be no errors on stderr')
-  strictEqual(stdout.trim(), actualOutput, 'The stdout should match the expected output')
+  // assert that the hook fails with a non-zero exit code
+  strictEqual(code, 1)
 });

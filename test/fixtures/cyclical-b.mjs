@@ -1,7 +1,6 @@
-import { testB } from './b.mjs';
+import { testA } from './cyclical-a.mjs';
 
-export function testA() {
-  console.log("testA");
+export function testB() {
+  console.log("testB");
+  testA();
 }
-
-testB();
