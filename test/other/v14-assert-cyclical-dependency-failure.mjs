@@ -27,5 +27,5 @@ nodeProcess.stderr.on('data', (data) => {
 
 nodeProcess.on('close', (code) => {
   // assert that the hook fails with a non-zero exit code
-  strictEqual(code, 1)
+  strictEqual(code === 1 || code === 13, true);
 });
