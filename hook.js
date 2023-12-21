@@ -146,7 +146,7 @@ async function processModule({ srcUrl, context, parentGetSource }) {
     `)
   }
 
-  return { imports, namespaces, setters }
+  return { imports, namespaces, setters: Array.from(new Set(setters)) }
 }
 
 function addIitm (url) {
