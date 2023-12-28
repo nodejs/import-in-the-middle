@@ -5,10 +5,13 @@
 // This replicates the way the in-the-wild `got` module does things:
 // https://github.com/sindresorhus/got/blob/3822412/source/index.ts
 
-const got = {
-  foo: 'foo'
+class got {
+  foo = 'foo'
 }
 
 export default got
 export { got }
 export * from './something.mjs'
+export * from './default-class.mjs'
+export * from './snake_case.mjs'
+export { default as renamedDefaultExport } from './lib/baz.mjs'

@@ -111,33 +111,75 @@ function isStarExportLine(line) {
  * @param {object} params
  * @param {string} params.srcUrl The full URL to the module to process.
  * @param {object} params.context Provided by the loaders API.
- * @param {function} parentGetSource Provides the source code for the parent
- * module.
+ * @param {Function} params.parentGetSource Provides the source code for the
+ * parent module.
+ * @param {string} [params.ns='namespace'] A string identifier that will be
+ * used as the namespace for the identifiers exported by the module.
+ * @param {string} [params.defaultAs='default'] The name to give the default
+ * identifier exported by the module (if one exists). This is really only
+ * useful in a recursive situation where a transitive module's default export
+ * needs to be renamed to the name of the module.
+ *
  * @returns {Promise<ProcessedModule>}
  */
-async function processModule({ srcUrl, context, parentGetSource }) {
-  const exportNames = await getExports(srcUrl, context, parentGetSource)
-  const imports = [`import * as namespace from ${JSON.stringify(srcUrl)}`]
-  const namespaces = ['namespace']
+async function processModule({
+  srcUrl,
+  context,
+  parentGetSource,
+  ns = 'namespace',
+  defaultAs = 'default'
+}) {
+  const exportNames = await getExports({
+    url: srcUrl,
+    context,
+    parentLoad: parentGetSource,
+    defaultAs
+  })
+  const imports = [`import * as ${ns} from ${JSON.stringify(srcUrl)}`]
+  const namespaces = [ns]
   const setters = []
 
   for (const n of exportNames) {
     if (isStarExportLine(n) === true) {
       const [_, modFile] = n.split('* from ')
+      const normalizedModName = normalizeModName(modFile)
       const modUrl = new URL(modFile, srcUrl).toString()
       const modName = Buffer.from(modFile, 'hex') + Date.now() + randomBytes(4).toString('hex')
 
-      imports.push(`import * as $${modName} from ${JSON.stringify(modUrl)}`)
-      namespaces.push(`$${modName}`)
-
-      const data = await processModule({ srcUrl: modUrl, context, parentGetSource })
+      const data = await processModule({
+        srcUrl: modUrl,
+        context,
+        parentGetSource,
+        ns: `$${modName}`,
+        defaultAs: normalizedModName
+      })
+      Array.prototype.push.apply(imports, data.imports)
+      Array.prototype.push.apply(namespaces, data.namespaces)
       Array.prototype.push.apply(setters, data.setters)
 
       continue
     }
 
+    const matches = /^rename (.+) as (.+)$/.exec(n)
+    if (matches !== null) {
+      // Transitive modules that export a default identifier need to have
+      // that identifier renamed to the name of module. And our shim setter
+      // needs to utilize that new name while being initialized from the
+      // corresponding origin namespace.
+      const renamedExport = matches[2]
+      setters.push(`
+      let $${renamedExport} = ${ns}.default
+      export { $${renamedExport} as ${renamedExport} }
+      set.${renamedExport} = (v) => {
+        $${renamedExport} = v
+        return true
+      }
+      `)
+      continue
+    }
+
     setters.push(`
-    let $${n} = _.${n}
+    let $${n} = ${ns}.${n}
     export { $${n} as ${n} }
     set.${n} = (v) => {
       $${n} = v
@@ -146,7 +188,25 @@ async function processModule({ srcUrl, context, parentGetSource }) {
     `)
   }
 
-  return { imports, namespaces, setters: Array.from(new Set(setters)) }
+  return { imports, namespaces, setters }
+}
+
+/**
+ * Given a module name, e.g. 'foo-bar' or './foo-bar.js', normalize it to a
+ * string that is a valid JavaScript identifier, e.g. `fooBar`. Normalization
+ * means converting kebab-case to camelCase while removing any path tokens and
+ * file extensions.
+ *
+ * @param {string} name The module name to normalize.
+ *
+ * @returns {string} The normalized identifier.
+ */
+function normalizeModName(name) {
+  return name
+    .split('\/')
+    .pop()
+    .replace(/(.+)\.(?:js|mjs)$/, '$1')
+    .replaceAll(/(-.)/g, x => x[1].toUpperCase())
 }
 
 function addIitm (url) {
@@ -200,15 +260,53 @@ function createHook (meta) {
           parentGetSource
       })
 
+      // When we encounter modules that re-export all identifiers from other
+      // modules, it is possible that the transitive modules export a default
+      // identifier. Due to us having to merge all transitive modules into a
+      // single common namespace, we need to recognize these default exports
+      // and remap them to a name based on the module name. This prevents us
+      // from overriding the top-level module's (the one actually being imported
+      // by some source code) default export when we merge the namespaces.
+      const renamedDefaults = setters
+        .map(s => {
+          const matches = /let \$(.+) = (\$.+)\.default/.exec(s)
+          if (matches === null) return
+          return `_['${matches[1]}'] = ${matches[2]}.default`
+        })
+        .filter(s => s)
+
+      // The for loops are how we merge namespaces into a common namespace that
+      // can be proxied. We can't use a simple `Object.assign` style merging
+      // because transitive modules can export a default identifier that would
+      // override the desired default identifier. So we need to do manual
+      // merging with some logic around default identifiers.
+      //
+      // Additionally, we need to make sure any renamed default exports in
+      // transitive dependencies are added to the common namespace. This is
+      // accomplished through the `renamedDefaults` array.
       return {
         source: `
 import { register } from '${iitmURL}'
 ${imports.join('\n')}
 
-const _ = Object.assign({}, ...[${namespaces.join(', ')}])
+const namespaces = [${namespaces.join(', ')}]
+const _ = {}
 const set = {}
 
+const primary = namespaces.shift()
+for (const [k, v] of Object.entries(primary)) {
+  _[k] = v
+}
+for (const ns of namespaces) {
+  for (const [k, v] of Object.entries(ns)) {
+    if (k === 'default') continue
+    _[k] = v
+  }
+}
+
 ${setters.join('\n')}
+${renamedDefaults.join('\n')}
+
 register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(realUrl))})
 `
       }
