@@ -98,8 +98,10 @@ function isStarExportLine(line) {
  * @property {string[]} namespaces A set of identifiers representing the
  * modules in `imports`, e.g. for `import * as foo from 'bar'`, "foo" will be
  * present in this array.
- * @property {string[]} setters The shimmed setters for all the exports
- * from the module and any transitive export all modules.
+ * @property {Map<string, string>} setters The shimmed setters for all the
+ * exports from the module and any transitive export all modules. The key is
+ * used to deduplicate conflicting exports, assigning a priority to `default`
+ * exports.
  */
 
 /**
@@ -137,7 +139,16 @@ async function processModule({
   })
   const imports = [`import * as ${ns} from ${JSON.stringify(srcUrl)}`]
   const namespaces = [ns]
-  const setters = []
+
+  // As we iterate found module exports we will add setter code blocks
+  // to this map that will eventually be inserted into the shim module's
+  // source code. We utilize a map in order to prevent duplicate exports.
+  // As a consequence of default renaming, it is possible that a file named
+  // `foo.mjs` which has `export function foo() {}` and `export default foo`
+  // exports will result in the "foo" export being defined twice in our shim.
+  // The map allows us to avoid this situation at the cost of losing the
+  // named export in favor of the default export.
+  const setters = new Map()
 
   for (const n of exportNames) {
     if (isStarExportLine(n) === true) {
@@ -155,7 +166,9 @@ async function processModule({
       })
       Array.prototype.push.apply(imports, data.imports)
       Array.prototype.push.apply(namespaces, data.namespaces)
-      Array.prototype.push.apply(setters, data.setters)
+      for (const [k, v] of data.setters.entries()) {
+        setters.set(k, v)
+      }
 
       continue
     }
@@ -167,7 +180,7 @@ async function processModule({
       // needs to utilize that new name while being initialized from the
       // corresponding origin namespace.
       const renamedExport = matches[2]
-      setters.push(`
+      setters.set(`$${renamedExport}${ns}`, `
       let $${renamedExport} = ${ns}.default
       export { $${renamedExport} as ${renamedExport} }
       set.${renamedExport} = (v) => {
@@ -178,7 +191,7 @@ async function processModule({
       continue
     }
 
-    setters.push(`
+    setters.set(`$${n}`+ns, `
     let $${n} = ${ns}.${n}
     export { $${n} as ${n} }
     set.${n} = (v) => {
@@ -254,11 +267,12 @@ function createHook (meta) {
   async function getSource (url, context, parentGetSource) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
-      const { imports, namespaces, setters } = await processModule({
+      const { imports, namespaces, setters: mapSetters } = await processModule({
           srcUrl: realUrl,
           context,
           parentGetSource
       })
+      const setters = Array.from(mapSetters.values())
 
       // When we encounter modules that re-export all identifiers from other
       // modules, it is possible that the transitive modules export a default
