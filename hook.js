@@ -19,7 +19,7 @@ let getExports
 if (NODE_MAJOR >= 20 || (NODE_MAJOR == 18 && NODE_MINOR >= 19)) {
   getExports = require('./lib/get-exports.js')
 } else {
-  getExports = (url) => import(url).then(Object.keys)
+  getExports = ({ url }) => import(url).then(Object.keys)
 }
 
 function hasIitm (url) {

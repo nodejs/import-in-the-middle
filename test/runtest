@@ -23,11 +23,11 @@ const match = filename.match(/v([0-9]+)(?:\.([0-9]+))?/)
 const majorRequirement = match ? match[1] : 0;
 const minorRequirement = match && match[2];
 
-if (processMajor < majorRequirement && minorRequirement === undefined) {
+if (processMajor < majorRequirement) {
   console.log(`skipping ${filename} as this is Node.js v${processMajor} and test wants v${majorRequirement}`);
   process.exit(0);
 }
-if (processMajor < majorRequirement && processMinor < minorRequirement) {
+if (processMajor <= majorRequirement && processMinor < minorRequirement) {
   console.log(`skipping ${filename} as this is Node.js v${processMajor}.${processMinor} and test wants >=v${majorRequirement}.${minorRequirement}`);
   process.exit(0);
 }
