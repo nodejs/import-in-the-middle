@@ -52,6 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      # We need to check out the source in order for genhtml to work
+      - uses: actions/checkout@v4
       - name: Download reports' artifacts
         uses: actions/download-artifact@v3
         with:
@@ -67,3 +69,13 @@ jobs:
         run: >
           lcov --summary all_lcov.info
           lcov --summary all_lcov.info | grep lines | cut -d' ' -f 4 | cut -d% -f 1 | xargs node -e "x=process.argv[1];console.log(x);assert(+x >= 90)"
+      - name: Generate HTML report
+        run: |
+          mkdir html_report
+          genhtml -o html_report all_lcov.info
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: 00_html_coverage_report
+          if-no-files-found: ignore
+          path: html_report/
