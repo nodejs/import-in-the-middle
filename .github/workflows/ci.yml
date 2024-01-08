@@ -65,10 +65,9 @@ jobs:
       - name: Combine all coverage data
         run: |
           find . -type f -name '*.info' -exec echo -a {} \; | xargs --verbose lcov -o all_lcov.info
-      - name: Report
+      - name: Generate Coverage Report
         run: >
           lcov --summary all_lcov.info
-          lcov --summary all_lcov.info | grep lines | cut -d' ' -f 4 | cut -d% -f 1 | xargs node -e "x=process.argv[1];console.log(x);assert(+x >= 90)"
       - name: Generate HTML report
         run: |
           mkdir html_report
@@ -79,3 +78,6 @@ jobs:
           name: 00_html_coverage_report
           if-no-files-found: ignore
           path: html_report/
+      - name: Verify Minimum Coverage Is Met
+        run: >
+          lcov --summary all_lcov.info | grep lines | cut -d' ' -f 4 | cut -d% -f 1 | xargs node -e "x=process.argv[1];console.log(x);assert(+x >= 90)"
