@@ -1,1 +1,1 @@
-export default function* generatorFunctionName() { return 1 }
+export default function * generatorFunctionName () { return 1 }

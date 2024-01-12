@@ -1,8 +1,8 @@
-let env = {FOO: 'baz'};
+let env = { FOO: 'baz' }
 
-function setEnv(newEnv) {
-  console.log('setting env, env.FOO is', newEnv.FOO);
-  env = newEnv;
+function setEnv (newEnv) {
+  console.log('setting env, env.FOO is', newEnv.FOO)
+  env = newEnv
 }
 
-export { setEnv, env };
+export { setEnv, env }

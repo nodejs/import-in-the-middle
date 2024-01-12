@@ -1,0 +1,18 @@
+overrides:
+  - files:
+    - '**/*.{js,cjs,mjs}'
+
+parser: '@babel/eslint-parser'
+parserOptions:
+  ecmaVersion: latest
+  requireConfigFile: false
+  sourceType: 'script'
+  babelOptions:
+    plugins:
+      - '@babel/plugin-syntax-import-assertions'
+
+rules:
+  "import/first": off
+
+extends:
+  - "standard"

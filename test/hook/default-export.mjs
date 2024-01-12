@@ -21,41 +21,34 @@ Hook((exports, name) => {
     exports.default[0] += 1
   } else if (name.match(/default-expression-num\.m?js/)) {
     exports.default += 1
-  }
-  else if (name.match(/default-expression-string\.m?js/)) {
+  } else if (name.match(/default-expression-string\.m?js/)) {
     exports.default += 'dawg'
-  }
-  else if (name.match(/default-function\.m?js/)) {
+  } else if (name.match(/default-function\.m?js/)) {
     const orig = exports.default
     exports.default = function () {
       return orig() + 1
     }
-  }
-  else if (name.match(/default-class\.m?js/)) {
+  } else if (name.match(/default-class\.m?js/)) {
     exports.default.prototype.getFoo = function () {
       return 2
     }
-  }
-  else if (name.match(/default-generator\.m?js/)) {
+  } else if (name.match(/default-generator\.m?js/)) {
     const orig2 = exports.default
-    exports.default = function* () {
+    exports.default = function * () {
       return orig2().next().value + 1
     }
-  }
-  else if (name.match(/default-function-anon\.m?js/)) {
+  } else if (name.match(/default-function-anon\.m?js/)) {
     const orig = exports.default
     exports.default = function () {
       return orig() + 1
     }
-  }
-  else if (name.match(/default-class-anon\.m?js/)) {
+  } else if (name.match(/default-class-anon\.m?js/)) {
     exports.default.prototype.getFoo = function () {
       return 2
     }
-  }
-  else if (name.match(/default-generator-anon\.m?js/)) {
+  } else if (name.match(/default-generator-anon\.m?js/)) {
     const orig2 = exports.default
-    exports.default = function* () {
+    exports.default = function * () {
       return orig2().next().value + 1
     }
   } else if (name.match(/import-default-export\.m?js/)) {
@@ -71,6 +64,7 @@ Hook((exports, name) => {
   }
 })
 
+/* eslint-disable new-cap */
 strictEqual(defaultImportExport(), 2)
 strictEqual(varDefaultExport(), 2)
 strictEqual(a[0], 2)

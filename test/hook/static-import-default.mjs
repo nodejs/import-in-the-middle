@@ -10,13 +10,13 @@ import { strictEqual } from 'assert'
 Hook((exports, name) => {
   if (name.match(/something.mjs/)) {
     const orig = exports.default
-    exports.default = function bar() {
+    exports.default = function bar () {
       return orig() + 15
     }
   }
   if (name.match(/something.js/)) {
     const orig = exports.default
-    return function bar() {
+    return function bar () {
       return orig() + 15
     }
   }

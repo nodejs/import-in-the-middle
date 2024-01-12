@@ -5,6 +5,18 @@ on:
     - cron: '0 4 * * *'
 
 jobs:
+  lint:
+    # The linting packages require modern Node.js versions in order to run.
+    # Therefore, we run linting separately and only once.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - run: npm install
+      - run: npm run lint
+
   build:
     runs-on: ubuntu-latest
 

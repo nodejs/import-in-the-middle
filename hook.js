@@ -4,7 +4,7 @@
 
 const { randomBytes } = require('crypto')
 const specifiers = new Map()
-const isWin = process.platform === "win32"
+const isWin = process.platform === 'win32'
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
@@ -16,7 +16,7 @@ const NODE_MINOR = Number(NODE_VERSION[1])
 let entrypoint
 
 let getExports
-if (NODE_MAJOR >= 20 || (NODE_MAJOR == 18 && NODE_MINOR >= 19)) {
+if (NODE_MAJOR >= 20 || (NODE_MAJOR === 18 && NODE_MINOR >= 19)) {
   getExports = require('./lib/get-exports.js')
 } else {
   getExports = ({ url }) => import(url).then(Object.keys)
@@ -56,7 +56,7 @@ function deleteIitm (url) {
   return resultUrl
 }
 
-function isNode16AndBiggerOrEqualsThan16_17_0() {
+function isNodeMajor16AndMinor17OrGreater () {
   return NODE_MAJOR === 16 && NODE_MINOR >= 17
 }
 
@@ -68,11 +68,11 @@ function isNodeProtocol (urlObj) {
   return urlObj.protocol === 'node:'
 }
 
-function needsToAddFileProtocol(urlObj) {
+function needsToAddFileProtocol (urlObj) {
   if (NODE_MAJOR === 17) {
     return !isFileProtocol(urlObj)
   }
-  if (isNode16AndBiggerOrEqualsThan16_17_0()) {
+  if (isNodeMajor16AndMinor17OrGreater()) {
     return !isFileProtocol(urlObj) && !isNodeProtocol(urlObj)
   }
   return !isFileProtocol(urlObj) && NODE_MAJOR < 18
@@ -87,7 +87,7 @@ function needsToAddFileProtocol(urlObj) {
  * @param {string} line
  * @returns {boolean}
  */
-function isStarExportLine(line) {
+function isStarExportLine (line) {
   return /^\* from /.test(line)
 }
 
@@ -124,7 +124,7 @@ function isStarExportLine(line) {
  *
  * @returns {Promise<ProcessedModule>}
  */
-async function processModule({
+async function processModule ({
   srcUrl,
   context,
   parentGetSource,
@@ -152,7 +152,7 @@ async function processModule({
 
   for (const n of exportNames) {
     if (isStarExportLine(n) === true) {
-      const [_, modFile] = n.split('* from ')
+      const [, modFile] = n.split('* from ')
       const normalizedModName = normalizeModName(modFile)
       const modUrl = new URL(modFile, srcUrl).toString()
       const modName = Buffer.from(modFile, 'hex') + Date.now() + randomBytes(4).toString('hex')
@@ -191,7 +191,7 @@ async function processModule({
       continue
     }
 
-    setters.set(`$${n}`+ns, `
+    setters.set(`$${n}` + ns, `
     let $${n} = ${ns}.${n}
     export { $${n} as ${n} }
     set.${n} = (v) => {
@@ -214,9 +214,9 @@ async function processModule({
  *
  * @returns {string} The normalized identifier.
  */
-function normalizeModName(name) {
+function normalizeModName (name) {
   return name
-    .split('\/')
+    .split('/')
     .pop()
     .replace(/(.+)\.(?:js|mjs)$/, '$1')
     .replaceAll(/(-.)/g, x => x[1].toUpperCase())
@@ -253,7 +253,6 @@ function createHook (meta) {
       return url
     }
 
-
     specifiers.set(url.url, specifier)
 
     return {
@@ -268,9 +267,9 @@ function createHook (meta) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
       const { imports, namespaces, setters: mapSetters } = await processModule({
-          srcUrl: realUrl,
-          context,
-          parentGetSource
+        srcUrl: realUrl,
+        context,
+        parentGetSource
       })
       const setters = Array.from(mapSetters.values())
 
@@ -284,7 +283,7 @@ function createHook (meta) {
       const renamedDefaults = setters
         .map(s => {
           const matches = /let \$(.+) = (\$.+)\.default/.exec(s)
-          if (matches === null) return
+          if (matches === null) return undefined
           return `_['${matches[1]}'] = ${matches[2]}.default`
         })
         .filter(s => s)
