@@ -1,4 +1,4 @@
-import {foo} from '../fixtures/reexport.js';
+import { foo } from '../fixtures/reexport.js'
 import Hook from '../../index.js'
 import { strictEqual } from 'assert'
 
@@ -9,4 +9,3 @@ Hook((exports, name) => {
 })
 
 strictEqual(foo, 57)
-
