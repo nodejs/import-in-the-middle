@@ -230,17 +230,17 @@ function addIitm (url) {
 
 // moduleList is an optional Map specifiying which modules need IITM patching
 // format: { moduleName : ['/file1.js', '/file2.js'] }
-function createHook (meta, moduleList={}) {
-  async function resolve (specifier, context, parentResolve, moduleList) {
+function createHook (meta, moduleList = {}) {
+  async function resolve (specifier, context, parentResolve) {
     let patch = true
     if (moduleList.size) {
       patch = false // do not patch unless specifier is in moduleList
       if (moduleList.has(specifier)) { // if specifier is a module name present in moduleList
         patch = true
       } else {
-        for (let mod of moduleList.key) { // if specifier
+        for (const mod of moduleList.key) { // if specifier
           if (specifier.includes(mod)) {
-            for (let path of moduleList[mod]) {
+            for (const path of moduleList[mod]) {
               if (specifier.endsWith(mod + path) || specifier.endsWith(mod + path + '/')) {
                 patch = true
                 continue
@@ -282,7 +282,7 @@ function createHook (meta, moduleList={}) {
       }
     }
     const newSpecifier = deleteIitm(specifier)
-    if (isWin && parentURL.indexOf('file:node') === 0) {
+    if (isWin) {
       context.parentURL = ''
     }
     const url = await parentResolve(newSpecifier, context, parentResolve)
