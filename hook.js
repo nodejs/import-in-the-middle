@@ -238,7 +238,7 @@ function createHook (meta, moduleList = {}) {
       if (moduleList.has(specifier)) { // if specifier is a module name present in moduleList
         patch = true
       } else {
-        for (const mod of moduleList.key) { // if specifier
+        for (const mod of moduleList.key) { // if specifier is a file path
           if (specifier.includes(mod)) {
             for (const path of moduleList[mod]) {
               if (specifier.endsWith(mod + path) || specifier.endsWith(mod + path + '/')) {
@@ -259,7 +259,7 @@ function createHook (meta, moduleList = {}) {
       const url = await parentResolve(newSpecifier, context, parentResolve)
       if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
         entrypoint = url.url
-        return { url: url.url, format: 'commonjs' } // early return, find out format
+        return { url: url.url, format: 'commonjs' }
       }
 
       if (isIitm(parentURL, meta) || hasIitm(parentURL)) {
