@@ -303,7 +303,8 @@ import { register } from '${iitmURL}'
 ${imports.join('\n')}
 
 const namespaces = [${namespaces.join(', ')}]
-const _ = {}
+// Mimic a Module object (https://tc39.es/ecma262/#sec-module-namespace-objects).
+const _ = Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } })
 const set = {}
 
 const primary = namespaces.shift()
