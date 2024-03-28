@@ -228,69 +228,44 @@ function addIitm (url) {
   return needsToAddFileProtocol(urlObj) ? 'file:' + urlObj.href : urlObj.href
 }
 
-// moduleList is an optional Map specifiying which modules need IITM patching
-// format: { moduleName : ['/file1.js', '/file2.js'] }
-function createHook (meta, moduleList = {}) {
+// moduleList is an optional Set specifiying which modules need IITM patching
+// if moduleList is not set, IITM patches everything
+function createHook (meta, moduleList = new Set()) {
   async function resolve (specifier, context, parentResolve) {
-    let patch = true
-    if (moduleList.size) {
-      patch = false // do not patch unless specifier is in moduleList
-      if (moduleList.has(specifier)) { // if specifier is a module name present in moduleList
-        patch = true
-      } else {
-        for (const mod of moduleList.key) { // if specifier is a file path
-          if (specifier.includes(mod)) {
-            for (const path of moduleList[mod]) {
-              if (specifier.endsWith(mod + path) || specifier.endsWith(mod + path + '/')) {
-                patch = true
-                continue
-              }
-            }
-          }
-        }
-      }
-    }
-    if (patch) {
-      const { parentURL = '' } = context
-      const newSpecifier = deleteIitm(specifier)
-      if (isWin && parentURL.indexOf('file:node') === 0) {
-        context.parentURL = ''
-      }
-      const url = await parentResolve(newSpecifier, context, parentResolve)
-      if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
-        entrypoint = url.url
-        return { url: url.url, format: 'commonjs' }
-      }
-
-      if (isIitm(parentURL, meta) || hasIitm(parentURL)) {
-        return url
-      }
-
-      // Node.js v21 renames importAssertions to importAttributes
-      if (
-        (context.importAssertions && context.importAssertions.type === 'json') ||
-        (context.importAttributes && context.importAttributes.type === 'json')
-      ) {
-        return url
-      }
-
-      specifiers.set(url.url, specifier)
-      return {
-        url: addIitm(url.url),
-        shortCircuit: true,
-        format: url.format
-      }
-    }
+    const { parentURL = '' } = context
     const newSpecifier = deleteIitm(specifier)
-    if (isWin) {
+    if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
     }
     const url = await parentResolve(newSpecifier, context, parentResolve)
-    return { url: url.url, format: url.format }
+    if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
+      entrypoint = url.url
+      return { url: url.url, format: 'commonjs' }
+    }
+
+    if (isIitm(parentURL, meta) || hasIitm(parentURL)) {
+      return url
+    }
+
+    // Node.js v21 renames importAssertions to importAttributes
+    if (
+      (context.importAssertions && context.importAssertions.type === 'json') ||
+      (context.importAttributes && context.importAttributes.type === 'json')
+    ) {
+      return url
+    }
+
+    specifiers.set(url.url, specifier)
+    return {
+      url: addIitm(url.url),
+      shortCircuit: true,
+      format: url.format
+    }
   }
 
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   async function getSource (url, context, parentGetSource) {
+    if (moduleList.size && !moduleList.has(url)) return parentGetSource(url, context, parentGetSource)
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
       const { imports, namespaces, setters: mapSetters } = await processModule({
