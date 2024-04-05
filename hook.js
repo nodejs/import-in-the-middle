@@ -229,7 +229,8 @@ function addIitm (url) {
 }
 
 // moduleList is an optional Set specifiying which modules need IITM patching
-// if moduleList is not set, IITM patches everything
+// moduleList contains full file paths
+// if moduleList is empty, IITM patches everything
 function createHook (meta, moduleList = new Set()) {
   async function resolve (specifier, context, parentResolve) {
     const { parentURL = '' } = context
@@ -241,6 +242,11 @@ function createHook (meta, moduleList = new Set()) {
     if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
       entrypoint = url.url
       return { url: url.url, format: 'commonjs' }
+    }
+
+    // early return if
+    if (moduleList.size && !moduleList.has(url.url) && url.url.startsWith('file:///')) {
+      return { url: url.url, format: url.format }
     }
 
     if (isIitm(parentURL, meta) || hasIitm(parentURL)) {
@@ -265,7 +271,6 @@ function createHook (meta, moduleList = new Set()) {
 
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   async function getSource (url, context, parentGetSource) {
-    if (moduleList.size && !moduleList.has(url)) return parentGetSource(url, context, parentGetSource)
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
       const { imports, namespaces, setters: mapSetters } = await processModule({
