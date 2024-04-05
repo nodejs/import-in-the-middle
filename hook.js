@@ -244,7 +244,7 @@ function createHook (meta, moduleList = new Set()) {
       return { url: url.url, format: 'commonjs' }
     }
 
-    // early return if
+    // early return if a moduleList is non-empty and does not contain the fully resolved url
     if (moduleList.size && !moduleList.has(url.url) && url.url.startsWith('file:///')) {
       return { url: url.url, format: url.format }
     }
