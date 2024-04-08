@@ -12,6 +12,8 @@ const filename = process.env.IITM_TEST_FILE
 export const { load, resolve, getFormat, getSource } =
   filename.includes('disabled')
     ? {}
-    : (path.extname(filename).slice(-2) === 'ts' ? tsLoader
-      : filename.endsWith('filtered-export.mjs') ? filteredLoader
-        : regularLoader)
+    : (path.extname(filename).slice(-2) === 'ts'
+        ? tsLoader
+        : filename.endsWith('filtered-export.mjs')
+            ? filteredLoader
+            : regularLoader)
