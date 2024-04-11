@@ -1,10 +1,12 @@
 // Unless explicitly stated otherwise all files in this repository are licensed under the Apache 2.0 License.
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
+const path = require('path')
 
 const { randomBytes } = require('crypto')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
+const hookURL = 'file://' + path.join(__dirname, './hook.js')
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
@@ -31,7 +33,7 @@ function hasIitm (url) {
 }
 
 function isIitm (url, meta) {
-  return url === meta.url || url === meta.url.replace('hook.mjs', 'hook.js')
+  return url === meta.url || url === hookURL
 }
 
 function deleteIitm (url) {
@@ -231,8 +233,9 @@ function addIitm (url) {
 // moduleList is an optional Set specifiying which modules need IITM patching
 // moduleList contains full file paths
 // if moduleList is empty, IITM patches everything
-function createHook (meta, moduleList = new Set()) {
+function createHook (meta) {
   async function resolve (specifier, context, parentResolve) {
+    const moduleList = process.env.MODULES_TO_PATCH ? new Set(process.env.MODULES_TO_PATCH.split(', ')) : new Set()
     const { parentURL = '' } = context
     const newSpecifier = deleteIitm(specifier)
     if (isWin && parentURL.indexOf('file:node') === 0) {
@@ -241,6 +244,7 @@ function createHook (meta, moduleList = new Set()) {
     const url = await parentResolve(newSpecifier, context, parentResolve)
     if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
       entrypoint = url.url
+      // console.log(1, parentURL)
       return { url: url.url, format: 'commonjs' }
     }
 
@@ -258,10 +262,12 @@ function createHook (meta, moduleList = new Set()) {
       (context.importAssertions && context.importAssertions.type === 'json') ||
       (context.importAttributes && context.importAttributes.type === 'json')
     ) {
+      // console.log(3, url.url)
       return url
     }
 
     specifiers.set(url.url, specifier)
+    // console.log(4, url.url)
     return {
       url: addIitm(url.url),
       shortCircuit: true,
