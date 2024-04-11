@@ -15,7 +15,5 @@ Hook((exports, name) => {
   }
 })
 
-console.log('a', a)
-console.log('n', n)
 strictEqual(a[0], 2)
 strictEqual(n, 1)
