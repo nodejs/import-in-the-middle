@@ -10,11 +10,11 @@ import { strictEqual, deepStrictEqual } from 'assert'
 let hookedExports
 
 Hook((exports, name) => {
-  hookedExports = exports;
+  hookedExports = exports
 })
 
-fooMjs
-fooJs
+strictEqual(fooMjs, 42)
+strictEqual(fooJs, 42)
 
 strictEqual(hookedExports[Symbol.toStringTag], 'Module')
 deepStrictEqual(Object.getOwnPropertyDescriptor(hookedExports, Symbol.toStringTag), {
