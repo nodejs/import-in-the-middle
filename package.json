@@ -50,7 +50,7 @@
   },
   "dependencies": {
     "acorn": "^8.8.2",
-    "acorn-import-assertions": "^1.9.0",
+    "acorn-import-attributes": "^1.9.5",
     "cjs-module-lexer": "^1.2.2",
     "module-details-from-path": "^1.0.3"
   }
