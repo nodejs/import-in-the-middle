@@ -37,6 +37,7 @@ jobs:
           - 20.9.0
           - 20.x
           - 21.x
+          - 22.x
         os:
           - ubuntu-latest
           - macos-latest
