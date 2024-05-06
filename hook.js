@@ -230,6 +230,7 @@ function addIitm (url) {
 
 function createHook (meta) {
   async function resolve (specifier, context, parentResolve) {
+    const moduleList = process.env.MODULES_TO_PATCH ? new Set(process.env.MODULES_TO_PATCH.split(', ')) : new Set()
     const { parentURL = '' } = context
     const newSpecifier = deleteIitm(specifier)
     if (isWin && parentURL.indexOf('file:node') === 0) {
@@ -239,6 +240,11 @@ function createHook (meta) {
     if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
       entrypoint = url.url
       return { url: url.url, format: 'commonjs' }
+    }
+
+    // early return if a moduleList is non-empty and does not contain the fully resolved url
+    if (moduleList.size && !moduleList.has(url.url) && url.url.startsWith('file:///')) {
+      return { url: url.url, format: url.format }
     }
 
     if (isIitm(parentURL, meta) || hasIitm(parentURL)) {
@@ -254,7 +260,6 @@ function createHook (meta) {
     }
 
     specifiers.set(url.url, specifier)
-
     return {
       url: addIitm(url.url),
       shortCircuit: true,

@@ -7,6 +7,11 @@ import * as regularLoader from '../hook.mjs'
 import path from 'path'
 
 const filename = process.env.IITM_TEST_FILE
+const filteredModuleTest = path.join(import.meta.url, '../hook/filtered-export.mjs').slice(5)
+
+if (filename === filteredModuleTest) {
+  process.env.MODULES_TO_PATCH = path.join(import.meta.url, '../fixtures/export-types/default-expression-array.mjs').replace(':/', ':///')
+}
 
 export const { load, resolve, getFormat, getSource } =
   filename.includes('disabled')
