@@ -232,6 +232,7 @@ function createHook (meta) {
   const iitmURL = new URL('lib/register.js', meta.url).toString()
 
   async function resolve (specifier, context, parentResolve) {
+    // See github.com/DataDog/import-in-the-middle/pull/76.
     if (specifier === iitmURL) {
       return {
         url: specifier,
