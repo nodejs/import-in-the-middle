@@ -11,7 +11,7 @@ options (assuming they're run from the project root):
 
 ```
 --require ./test/version-check.js
---experimental-loader ./test/generic-loader.mmjs
+--experimental-loader ./test/generic-loader.mjs
 ```
 
 The entire test suite can be run with `npm test`.

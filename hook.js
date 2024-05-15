@@ -229,7 +229,16 @@ function addIitm (url) {
 }
 
 function createHook (meta) {
+  const iitmURL = new URL('lib/register.js', meta.url).toString()
+
   async function resolve (specifier, context, parentResolve) {
+    if (specifier === iitmURL) {
+      return {
+        url: specifier,
+        shortCircuit: true
+      }
+    }
+
     const { parentURL = '' } = context
     const newSpecifier = deleteIitm(specifier)
     if (isWin && parentURL.indexOf('file:node') === 0) {
@@ -262,7 +271,6 @@ function createHook (meta) {
     }
   }
 
-  const iitmURL = new URL('lib/register.js', meta.url).toString()
   async function getSource (url, context, parentGetSource) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
