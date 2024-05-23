@@ -163,12 +163,8 @@ async function processModule ({
 
       let modUrl
       if (isBareSpecifier(modFile)) {
-        try {
           const result = await parentResolve(modFile, { parentURL: srcUrl })
           modUrl = result.url
-        } catch (_) {
-          // ignore
-        }
       } else {
         modUrl = new URL(modFile, srcUrl).toString()
       }
