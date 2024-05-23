@@ -180,7 +180,7 @@ async function processModule ({
       // needs to utilize that new name while being initialized from the
       // corresponding origin namespace.
       const renamedExport = matches[2]
-      setters.set(`$${renamedExport}${ns}`, `
+      setters.set(`$${renamedExport}`, `
       let $${renamedExport} = ${ns}.default
       export { $${renamedExport} as ${renamedExport} }
       set.${renamedExport} = (v) => {
@@ -191,7 +191,7 @@ async function processModule ({
       continue
     }
 
-    setters.set(`$${n}` + ns, `
+    setters.set(`$${n}`, `
     let $${n} = ${ns}.${n}
     export { $${n} as ${n} }
     set.${n} = (v) => {
