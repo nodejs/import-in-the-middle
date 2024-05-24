@@ -3,6 +3,7 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
 const { randomBytes } = require('crypto')
+const { URL } = require('url')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
 
@@ -92,7 +93,21 @@ function isStarExportLine (line) {
 }
 
 function isBareSpecifier (specifier) {
-  return /^[a-zA-Z@]/.test(specifier) && !specifier.startsWith('file:')
+  // Relative and absolute paths are not bare specifiers.
+  if (
+    specifier.startsWith('.') ||
+    specifier.startsWith('/')) {
+    return false
+  }
+
+  // Valid URLs are not bare specifiers. (file:, http:, node:, etc.)
+  try {
+    // eslint-disable-next-line no-new
+    new URL(specifier)
+    return false
+  } catch (err) {
+    return true
+  }
 }
 
 /**
@@ -163,8 +178,9 @@ async function processModule ({
 
       let modUrl
       if (isBareSpecifier(modFile)) {
-          const result = await parentResolve(modFile, { parentURL: srcUrl })
-          modUrl = result.url
+        // Bare specifiers need to be resolved relative to the parent module.
+        const result = await parentResolve(modFile, { parentURL: srcUrl })
+        modUrl = result.url
       } else {
         modUrl = new URL(modFile, srcUrl).toString()
       }
