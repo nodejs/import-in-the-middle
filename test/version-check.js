@@ -12,7 +12,7 @@ process.env.IITM_TEST_FILE = filename
 
 const [processMajor, processMinor] = process.versions.node.split('.').map(Number)
 
-const match = filename.match(/v([0-9]+)(?:\.([0-9]+))?-(?:v([0-9]+))?/)
+const match = filename.match(/v([0-9]+)(?:\.([0-9]+))?(?:-v([0-9]+))?/)
 
 const majorRequirement = match ? match[1] : 0
 const minorRequirement = match && match[2]
