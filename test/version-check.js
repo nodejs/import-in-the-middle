@@ -12,10 +12,11 @@ process.env.IITM_TEST_FILE = filename
 
 const [processMajor, processMinor] = process.versions.node.split('.').map(Number)
 
-const match = filename.match(/v([0-9]+)(?:\.([0-9]+))?/)
+const match = filename.match(/v([0-9]+)(?:\.([0-9]+))?(?:-v([0-9]+))?/)
 
 const majorRequirement = match ? match[1] : 0
 const minorRequirement = match && match[2]
+const majorMax = match ? match[3] : Infinity
 
 if (processMajor < majorRequirement) {
   console.log(`skipping ${filename} as this is Node.js v${processMajor} and test wants v${majorRequirement}`)
@@ -23,5 +24,10 @@ if (processMajor < majorRequirement) {
 }
 if (processMajor <= majorRequirement && processMinor < minorRequirement) {
   console.log(`skipping ${filename} as this is Node.js v${processMajor}.${processMinor} and test wants >=v${majorRequirement}.${minorRequirement}`)
+  process.exit(0)
+}
+
+if (processMajor > majorMax) {
+  console.log(`skipping ${filename} as this is Node.js v${processMajor} and test wants <=v${majorMax}`)
   process.exit(0)
 }
