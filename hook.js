@@ -101,6 +101,12 @@ function isBareSpecifier (specifier) {
   }
 
   // Valid URLs are not bare specifiers. (file:, http:, node:, etc.)
+
+  // eslint-disable-next-line no-prototype-builtins
+  if (URL.hasOwnProperty('canParse')) {
+    return !URL.canParse(specifier)
+  }
+
   try {
     // eslint-disable-next-line no-new
     new URL(specifier)
@@ -182,7 +188,7 @@ async function processModule ({
         const result = await parentResolve(modFile, { parentURL: srcUrl })
         modUrl = result.url
       } else {
-        modUrl = new URL(modFile, srcUrl).toString()
+        modUrl = new URL(modFile, srcUrl).href
       }
 
       const data = await processModule({
