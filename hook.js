@@ -253,6 +253,15 @@ function createHook (meta) {
       return url
     }
 
+    // If the file is referencing itself, we need to skip adding the iitm search params
+    if (url.url === parentURL) {
+      return {
+        url: url.url,
+        shortCircuit: true,
+        format: url.format
+      }
+    }
+
     specifiers.set(url.url, specifier)
 
     return {
