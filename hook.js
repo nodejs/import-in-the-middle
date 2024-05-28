@@ -3,6 +3,7 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
 const { randomBytes } = require('crypto')
+const { URL } = require('url')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
 
@@ -91,6 +92,30 @@ function isStarExportLine (line) {
   return /^\* from /.test(line)
 }
 
+function isBareSpecifier (specifier) {
+  // Relative and absolute paths are not bare specifiers.
+  if (
+    specifier.startsWith('.') ||
+    specifier.startsWith('/')) {
+    return false
+  }
+
+  // Valid URLs are not bare specifiers. (file:, http:, node:, etc.)
+
+  // eslint-disable-next-line no-prototype-builtins
+  if (URL.hasOwnProperty('canParse')) {
+    return !URL.canParse(specifier)
+  }
+
+  try {
+    // eslint-disable-next-line no-new
+    new URL(specifier)
+    return false
+  } catch (err) {
+    return true
+  }
+}
+
 /**
  * @typedef {object} ProcessedModule
  * @property {string[]} imports A set of ESM import lines to be added to the
@@ -128,6 +153,7 @@ async function processModule ({
   srcUrl,
   context,
   parentGetSource,
+  parentResolve,
   ns = 'namespace',
   defaultAs = 'default'
 }) {
@@ -154,13 +180,22 @@ async function processModule ({
     if (isStarExportLine(n) === true) {
       const [, modFile] = n.split('* from ')
       const normalizedModName = normalizeModName(modFile)
-      const modUrl = new URL(modFile, srcUrl).toString()
       const modName = Buffer.from(modFile, 'hex') + Date.now() + randomBytes(4).toString('hex')
+
+      let modUrl
+      if (isBareSpecifier(modFile)) {
+        // Bare specifiers need to be resolved relative to the parent module.
+        const result = await parentResolve(modFile, { parentURL: srcUrl })
+        modUrl = result.url
+      } else {
+        modUrl = new URL(modFile, srcUrl).href
+      }
 
       const data = await processModule({
         srcUrl: modUrl,
         context,
         parentGetSource,
+        parentResolve,
         ns: `$${modName}`,
         defaultAs: normalizedModName
       })
@@ -229,7 +264,9 @@ function addIitm (url) {
 }
 
 function createHook (meta) {
+  let cachedResolve
   async function resolve (specifier, context, parentResolve) {
+    cachedResolve = parentResolve
     const { parentURL = '' } = context
     const newSpecifier = deleteIitm(specifier)
     if (isWin && parentURL.indexOf('file:node') === 0) {
@@ -278,7 +315,8 @@ function createHook (meta) {
       const { imports, namespaces, setters: mapSetters } = await processModule({
         srcUrl: realUrl,
         context,
-        parentGetSource
+        parentGetSource,
+        parentResolve: cachedResolve
       })
       const setters = Array.from(mapSetters.values())
 
