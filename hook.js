@@ -124,7 +124,7 @@ function mapExcludingDuplicates () {
       if (map.has(k)) {
         duplicates.add(k)
         map.delete(k)
-      } else {
+      } else if (!duplicates.has(k)) {
         map.set(k, v)
       }
     },
