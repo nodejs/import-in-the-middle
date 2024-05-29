@@ -116,6 +116,24 @@ function isBareSpecifier (specifier) {
   }
 }
 
+function mapExcludingDuplicates () {
+  const map = new Map()
+  const duplicates = new Set()
+  return {
+    set (k, v) {
+      if (map.has(k)) {
+        duplicates.add(k)
+        map.delete(k)
+      } else {
+        map.set(k, v)
+      }
+    },
+    values: () => map.values(),
+    entries: () => map.entries()
+  }
+}
+
+
 /**
  * @typedef {object} ProcessedModule
  * @property {string[]} imports A set of ESM import lines to be added to the
@@ -169,12 +187,7 @@ async function processModule ({
   // As we iterate found module exports we will add setter code blocks
   // to this map that will eventually be inserted into the shim module's
   // source code. We utilize a map in order to prevent duplicate exports.
-  // As a consequence of default renaming, it is possible that a file named
-  // `foo.mjs` which has `export function foo() {}` and `export default foo`
-  // exports will result in the "foo" export being defined twice in our shim.
-  // The map allows us to avoid this situation at the cost of losing the
-  // named export in favor of the default export.
-  const setters = new Map()
+  const setters = mapExcludingDuplicates()
 
   for (const n of exportNames) {
     if (isStarExportLine(n) === true) {
@@ -208,25 +221,7 @@ async function processModule ({
       continue
     }
 
-    const matches = /^rename (.+) as (.+)$/.exec(n)
-    if (matches !== null) {
-      // Transitive modules that export a default identifier need to have
-      // that identifier renamed to the name of module. And our shim setter
-      // needs to utilize that new name while being initialized from the
-      // corresponding origin namespace.
-      const renamedExport = matches[2]
-      setters.set(`$${renamedExport}${ns}`, `
-      let $${renamedExport} = ${ns}.default
-      export { $${renamedExport} as ${renamedExport} }
-      set.${renamedExport} = (v) => {
-        $${renamedExport} = v
-        return true
-      }
-      `)
-      continue
-    }
-
-    setters.set(`$${n}` + ns, `
+    setters.set(n, `
     let $${n} = ${ns}.${n}
     export { $${n} as ${n} }
     set.${n} = (v) => {
@@ -320,30 +315,11 @@ function createHook (meta) {
       })
       const setters = Array.from(mapSetters.values())
 
-      // When we encounter modules that re-export all identifiers from other
-      // modules, it is possible that the transitive modules export a default
-      // identifier. Due to us having to merge all transitive modules into a
-      // single common namespace, we need to recognize these default exports
-      // and remap them to a name based on the module name. This prevents us
-      // from overriding the top-level module's (the one actually being imported
-      // by some source code) default export when we merge the namespaces.
-      const renamedDefaults = setters
-        .map(s => {
-          const matches = /let \$(.+) = (\$.+)\.default/.exec(s)
-          if (matches === null) return undefined
-          return `_['${matches[1]}'] = ${matches[2]}.default`
-        })
-        .filter(s => s)
-
       // The for loops are how we merge namespaces into a common namespace that
       // can be proxied. We can't use a simple `Object.assign` style merging
       // because transitive modules can export a default identifier that would
       // override the desired default identifier. So we need to do manual
       // merging with some logic around default identifiers.
-      //
-      // Additionally, we need to make sure any renamed default exports in
-      // transitive dependencies are added to the common namespace. This is
-      // accomplished through the `renamedDefaults` array.
       return {
         source: `
 import { register } from '${iitmURL}'
@@ -358,15 +334,15 @@ const primary = namespaces.shift()
 for (const [k, v] of Object.entries(primary)) {
   _[k] = v
 }
+
+${setters.join('\n')}
+
 for (const ns of namespaces) {
   for (const [k, v] of Object.entries(ns)) {
     if (k === 'default') continue
-    _[k] = v
+    if (k in set) _[k] = v
   }
 }
-
-${setters.join('\n')}
-${renamedDefaults.join('\n')}
 
 register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(realUrl))})
 `
