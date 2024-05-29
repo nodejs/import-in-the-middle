@@ -116,6 +116,25 @@ function isBareSpecifier (specifier) {
   }
 }
 
+function mapExcludingDuplicates () {
+  const map = new Map()
+  const duplicates = new Set()
+  return {
+    set (k, v, isDefault = false) {
+      if (map.has(k)) {
+        if (!isDefault) {
+          duplicates.add(k)
+          map.delete(k)
+        }
+      } else {
+        map.set(k, v)
+      }
+    },
+    values: () => map.values(),
+    entries: () => map.entries()
+  }
+}
+
 /**
  * @typedef {object} ProcessedModule
  * @property {string[]} imports A set of ESM import lines to be added to the
@@ -174,7 +193,7 @@ async function processModule ({
   // exports will result in the "foo" export being defined twice in our shim.
   // The map allows us to avoid this situation at the cost of losing the
   // named export in favor of the default export.
-  const setters = new Map()
+  const setters = mapExcludingDuplicates()
 
   for (const n of exportNames) {
     if (isStarExportLine(n) === true) {
@@ -215,18 +234,18 @@ async function processModule ({
       // needs to utilize that new name while being initialized from the
       // corresponding origin namespace.
       const renamedExport = matches[2]
-      setters.set(`$${renamedExport}`, `
+      setters.set(renamedExport, `
       let $${renamedExport} = ${ns}.default
       export { $${renamedExport} as ${renamedExport} }
       set.${renamedExport} = (v) => {
         $${renamedExport} = v
         return true
       }
-      `)
+      `, true)
       continue
     }
 
-    setters.set(`$${n}`, `
+    setters.set(n, `
     let $${n} = ${ns}.${n}
     export { $${n} as ${n} }
     set.${n} = (v) => {
