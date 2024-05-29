@@ -18,7 +18,7 @@ imported in ESM files, regardless of whether they're imported statically or
 dynamically.
 
 ```js
-import Hook from 'import-in-the-middle'
+import { Hook } from 'import-in-the-middle'
 import { foo } from 'package-i-want-to-modify'
 
 console.log(foo) // whatever that module exported
