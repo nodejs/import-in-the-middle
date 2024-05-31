@@ -89,5 +89,6 @@ Hook.prototype.unhook = function () {
 }
 
 module.exports = Hook
+module.exports.Hook = Hook
 module.exports.addHook = addHook
 module.exports.removeHook = removeHook

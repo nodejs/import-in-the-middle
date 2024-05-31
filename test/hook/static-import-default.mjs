@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-import Hook from '../../index.js'
+import { Hook } from '../../index.js'
 import barMjs from '../fixtures/something.mjs'
 import barJs from '../fixtures/something.js'
 import { strictEqual } from 'assert'
