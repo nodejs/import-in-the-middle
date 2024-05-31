@@ -2,7 +2,6 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-const { randomBytes } = require('crypto')
 const { URL } = require('url')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
@@ -20,7 +19,7 @@ let getExports
 if (NODE_MAJOR >= 20 || (NODE_MAJOR === 18 && NODE_MINOR >= 19)) {
   getExports = require('./lib/get-exports.js')
 } else {
-  getExports = ({ url }) => import(url).then(Object.keys)
+  getExports = (url) => import(url).then(Object.keys)
 }
 
 function hasIitm (url) {
@@ -117,70 +116,37 @@ function isBareSpecifier (specifier) {
 }
 
 /**
- * @typedef {object} ProcessedModule
- * @property {string[]} imports A set of ESM import lines to be added to the
- * shimmed module source.
- * @property {string[]} namespaces A set of identifiers representing the
- * modules in `imports`, e.g. for `import * as foo from 'bar'`, "foo" will be
- * present in this array.
- * @property {Map<string, string>} setters The shimmed setters for all the
- * exports from the module and any transitive export all modules. The key is
- * used to deduplicate conflicting exports, assigning a priority to `default`
- * exports.
- */
-
-/**
- * Processes a module's exports and builds a set of new import statements,
- * namespace names, and setter blocks. If an export all export if encountered,
- * the target exports will be hoisted to the current module via a generated
- * namespace.
+ * Processes a module's exports and builds a set of setter blocks.
  *
  * @param {object} params
  * @param {string} params.srcUrl The full URL to the module to process.
  * @param {object} params.context Provided by the loaders API.
- * @param {Function} params.parentGetSource Provides the source code for the
- * parent module.
- * @param {string} [params.ns='namespace'] A string identifier that will be
- * used as the namespace for the identifiers exported by the module.
- * @param {string} [params.defaultAs='default'] The name to give the default
- * identifier exported by the module (if one exists). This is really only
- * useful in a recursive situation where a transitive module's default export
- * needs to be renamed to the name of the module.
+ * @param {Function} params.parentGetSource Provides the source code for the parent module.
+ * @param {bool} params.excludeDefault Exclude the default export.
  *
- * @returns {Promise<ProcessedModule>}
+ * @returns {Promise<Map<string, string>>} The shimmed setters for all the exports
+ * from the module and any transitive export all modules.
  */
-async function processModule ({
-  srcUrl,
-  context,
-  parentGetSource,
-  parentResolve,
-  ns = 'namespace',
-  defaultAs = 'default'
-}) {
-  const exportNames = await getExports({
-    url: srcUrl,
-    context,
-    parentLoad: parentGetSource,
-    defaultAs
-  })
-  const imports = [`import * as ${ns} from ${JSON.stringify(srcUrl)}`]
-  const namespaces = [ns]
-
-  // As we iterate found module exports we will add setter code blocks
-  // to this map that will eventually be inserted into the shim module's
-  // source code. We utilize a map in order to prevent duplicate exports.
-  // As a consequence of default renaming, it is possible that a file named
-  // `foo.mjs` which has `export function foo() {}` and `export default foo`
-  // exports will result in the "foo" export being defined twice in our shim.
-  // The map allows us to avoid this situation at the cost of losing the
-  // named export in favor of the default export.
+async function processModule ({ srcUrl, context, parentGetSource, parentResolve, excludeDefault }) {
+  const exportNames = await getExports(srcUrl, context, parentGetSource)
+  const duplicates = new Set()
   const setters = new Map()
 
+  const addSetter = (name, setter) => {
+    // When doing an `import *` duplicates become undefined, so do the same
+    if (setters.has(name)) {
+      duplicates.add(name)
+      setters.delete(name)
+    } else if (!duplicates.has(name)) {
+      setters.set(name, setter)
+    }
+  }
+
   for (const n of exportNames) {
+    if (n === 'default' && excludeDefault) continue
+
     if (isStarExportLine(n) === true) {
       const [, modFile] = n.split('* from ')
-      const normalizedModName = normalizeModName(modFile)
-      const modName = Buffer.from(modFile, 'hex') + Date.now() + randomBytes(4).toString('hex')
 
       let modUrl
       if (isBareSpecifier(modFile)) {
@@ -191,70 +157,28 @@ async function processModule ({
         modUrl = new URL(modFile, srcUrl).href
       }
 
-      const data = await processModule({
+      const setters = await processModule({
         srcUrl: modUrl,
         context,
         parentGetSource,
-        parentResolve,
-        ns: `$${modName}`,
-        defaultAs: normalizedModName
+        excludeDefault: true
       })
-      Array.prototype.push.apply(imports, data.imports)
-      Array.prototype.push.apply(namespaces, data.namespaces)
-      for (const [k, v] of data.setters.entries()) {
-        setters.set(k, v)
+      for (const [name, setter] of setters.entries()) {
+        addSetter(name, setter)
       }
-
-      continue
-    }
-
-    const matches = /^rename (.+) as (.+)$/.exec(n)
-    if (matches !== null) {
-      // Transitive modules that export a default identifier need to have
-      // that identifier renamed to the name of module. And our shim setter
-      // needs to utilize that new name while being initialized from the
-      // corresponding origin namespace.
-      const renamedExport = matches[2]
-      setters.set(`$${renamedExport}${ns}`, `
-      let $${renamedExport} = ${ns}.default
-      export { $${renamedExport} as ${renamedExport} }
-      set.${renamedExport} = (v) => {
-        $${renamedExport} = v
+    } else {
+      addSetter(n, `
+      let $${n} = _.${n}
+      export { $${n} as ${n} }
+      set.${n} = (v) => {
+        $${n} = v
         return true
       }
       `)
-      continue
     }
-
-    setters.set(`$${n}` + ns, `
-    let $${n} = ${ns}.${n}
-    export { $${n} as ${n} }
-    set.${n} = (v) => {
-      $${n} = v
-      return true
-    }
-    `)
   }
 
-  return { imports, namespaces, setters }
-}
-
-/**
- * Given a module name, e.g. 'foo-bar' or './foo-bar.js', normalize it to a
- * string that is a valid JavaScript identifier, e.g. `fooBar`. Normalization
- * means converting kebab-case to camelCase while removing any path tokens and
- * file extensions.
- *
- * @param {string} name The module name to normalize.
- *
- * @returns {string} The normalized identifier.
- */
-function normalizeModName (name) {
-  return name
-    .split('/')
-    .pop()
-    .replace(/(.+)\.(?:js|mjs)$/, '$1')
-    .replaceAll(/(-.)/g, x => x[1].toUpperCase())
+  return setters
 }
 
 function addIitm (url) {
@@ -322,61 +246,25 @@ function createHook (meta) {
   async function getSource (url, context, parentGetSource) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
-      const { imports, namespaces, setters: mapSetters } = await processModule({
+      const setters = await processModule({
         srcUrl: realUrl,
         context,
         parentGetSource,
         parentResolve: cachedResolve
       })
-      const setters = Array.from(mapSetters.values())
-
-      // When we encounter modules that re-export all identifiers from other
-      // modules, it is possible that the transitive modules export a default
-      // identifier. Due to us having to merge all transitive modules into a
-      // single common namespace, we need to recognize these default exports
-      // and remap them to a name based on the module name. This prevents us
-      // from overriding the top-level module's (the one actually being imported
-      // by some source code) default export when we merge the namespaces.
-      const renamedDefaults = setters
-        .map(s => {
-          const matches = /let \$(.+) = (\$.+)\.default/.exec(s)
-          if (matches === null) return undefined
-          return `_['${matches[1]}'] = ${matches[2]}.default`
-        })
-        .filter(s => s)
-
-      // The for loops are how we merge namespaces into a common namespace that
-      // can be proxied. We can't use a simple `Object.assign` style merging
-      // because transitive modules can export a default identifier that would
-      // override the desired default identifier. So we need to do manual
-      // merging with some logic around default identifiers.
-      //
-      // Additionally, we need to make sure any renamed default exports in
-      // transitive dependencies are added to the common namespace. This is
-      // accomplished through the `renamedDefaults` array.
       return {
         source: `
 import { register } from '${iitmURL}'
-${imports.join('\n')}
+import * as namespace from ${JSON.stringify(realUrl)}
 
-const namespaces = [${namespaces.join(', ')}]
 // Mimic a Module object (https://tc39.es/ecma262/#sec-module-namespace-objects).
-const _ = Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } })
+const _ = Object.assign(
+  Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } }),
+  namespace
+)
 const set = {}
 
-const primary = namespaces.shift()
-for (const [k, v] of Object.entries(primary)) {
-  _[k] = v
-}
-for (const ns of namespaces) {
-  for (const [k, v] of Object.entries(ns)) {
-    if (k === 'default') continue
-    _[k] = v
-  }
-}
-
-${setters.join('\n')}
-${renamedDefaults.join('\n')}
+${Array.from(setters.values()).join('\n')}
 
 register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(realUrl))})
 `

@@ -12,6 +12,8 @@ import gfn from '../fixtures/export-types/default-generator.mjs'
 import afn from '../fixtures/export-types/default-function-anon.mjs'
 import acn from '../fixtures/export-types/default-class-anon.mjs'
 import agfn from '../fixtures/export-types/default-generator-anon.mjs'
+import callEx from '../fixtures/export-types/default-call-expression.mjs'
+import { somethingElse } from '../fixtures/export-types/default-call-expression-renamed.mjs'
 import defaultImportExport from '../fixtures/export-types/import-default-export.mjs'
 import varDefaultExport from '../fixtures/export-types/variable-default-export.mjs'
 import { strictEqual } from 'assert'
@@ -61,6 +63,10 @@ Hook((exports, name) => {
     exports.default = function () {
       return orig4() + 1
     }
+  } else if (name.match(/default-call-expression\.m?js/)) {
+    exports.default += 1
+  } else if (name.match(/default-call-expression-renamed\.m?js/)) {
+    exports.somethingElse += 1
   }
 })
 
@@ -76,3 +82,5 @@ strictEqual(new acn().getFoo(), 2)
 strictEqual(agfn().next().value, 2)
 strictEqual(n, 2)
 strictEqual(s, 'dogdawg')
+strictEqual(callEx, 2)
+strictEqual(somethingElse, 2)
