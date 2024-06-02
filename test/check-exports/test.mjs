@@ -6,6 +6,8 @@ import { fileURLToPath } from 'url'
 const cwd = dirname(fileURLToPath(import.meta.url))
 const hook = resolve(cwd, '..', '..', 'hook.mjs')
 
+let errored = false
+
 function getExports (name, loader) {
   const args = ['--input-type=module', '--no-warnings', '-e', `import * as lib from '${name}'; console.log(JSON.stringify(Object.keys(lib)))`]
   if (loader) args.push(loader)
@@ -26,6 +28,7 @@ function testLib (name) {
     console.log(`✅  Exports for '${name}' match`)
   } catch (err) {
     console.error(`❌  Error getting exports for '${name}':`, err)
+    errored = true
   }
 }
 
@@ -98,4 +101,9 @@ installLibs(modules)
 
 for (const mod of modules) {
   testLib(mod)
+}
+
+if (errored) {
+  console.error('❌  Some tests failed')
+  process.exit(1)
 }
