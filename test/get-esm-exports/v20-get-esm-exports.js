@@ -15,7 +15,7 @@ fixture.split('\n').forEach(line => {
   if (expectedNames[0] === '') {
     expectedNames.length = 0
   }
-  const names = getEsmExports(mod)
+  const names = Array.from(getEsmExports(mod))
   assert.deepEqual(expectedNames, names)
   console.log(`${mod}\n  ✅ contains exports: ${testStr}`)
 })
