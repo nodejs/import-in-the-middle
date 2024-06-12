@@ -148,9 +148,6 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
         starExports.delete(name)
         setters.set(name, setter)
       }
-
-      // We can only get here if there are two explicitly named exports which is
-      // not valid ESM
     } else {
       // Store export * exports so we know they can be overridden by explicit
       // named exports
