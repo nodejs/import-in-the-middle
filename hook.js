@@ -161,6 +161,7 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
         srcUrl: modUrl,
         context,
         parentGetSource,
+        parentResolve,
         excludeDefault: true
       })
       for (const [name, setter] of setters.entries()) {
