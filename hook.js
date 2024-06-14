@@ -129,15 +129,32 @@ function isBareSpecifier (specifier) {
  */
 async function processModule ({ srcUrl, context, parentGetSource, parentResolve, excludeDefault }) {
   const exportNames = await getExports(srcUrl, context, parentGetSource)
-  const duplicates = new Set()
+  const starExports = new Set()
   const setters = new Map()
 
-  const addSetter = (name, setter) => {
-    // When doing an `import *` duplicates become undefined, so do the same
+  const addSetter = (name, setter, isStarExport = false) => {
     if (setters.has(name)) {
-      duplicates.add(name)
-      setters.delete(name)
-    } else if (!duplicates.has(name)) {
+      if (isStarExport) {
+        // If there's already a matching star export, delete it
+        if (starExports.has(name)) {
+          setters.delete(name)
+        }
+        // and return so this is excluded
+        return
+      }
+
+      // if we already have this export but it is from a * export, overwrite it
+      if (starExports.has(name)) {
+        starExports.delete(name)
+        setters.set(name, setter)
+      }
+    } else {
+      // Store export * exports so we know they can be overridden by explicit
+      // named exports
+      if (isStarExport) {
+        starExports.add(name)
+      }
+
       setters.set(name, setter)
     }
   }
@@ -165,7 +182,7 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
         excludeDefault: true
       })
       for (const [name, setter] of setters.entries()) {
-        addSetter(name, setter)
+        addSetter(name, setter, true)
       }
     } else {
       addSetter(n, `

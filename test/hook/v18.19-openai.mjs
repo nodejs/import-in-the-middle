@@ -8,3 +8,9 @@ Hook((exports, name) => {
 })
 
 console.assert(OpenAI)
+
+const openAI = new OpenAI({
+  apiKey: 'doesnt-matter'
+})
+
+console.assert(openAI)
