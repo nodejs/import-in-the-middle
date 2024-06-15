@@ -261,7 +261,7 @@ function createHook (meta) {
     }
   }
 
-  async function getSource (url, context, parentGetSource) {
+  async function load (url, context, parentLoad) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
 
@@ -269,7 +269,7 @@ function createHook (meta) {
         const setters = await processModule({
           srcUrl: realUrl,
           context,
-          parentGetSource,
+          parentGetSource: parentLoad,
           parentResolve: cachedResolve
         })
         return {
@@ -312,15 +312,6 @@ register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(rea
       }
     }
 
-    return parentGetSource(url, context, parentGetSource)
-  }
-
-  // For Node.js 16.12.0 and higher.
-  async function load (url, context, parentLoad) {
-    if (hasIitm(url)) {
-      return getSource(url, context, parentLoad)
-    }
-
     return parentLoad(url, context, parentLoad)
   }
 
@@ -330,7 +321,7 @@ register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(rea
     return {
       load,
       resolve,
-      getSource,
+      getSource: load,
       getFormat (url, context, parentGetFormat) {
         if (hasIitm(url)) {
           return {
