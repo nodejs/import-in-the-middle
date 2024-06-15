@@ -273,6 +273,8 @@ function createHook (meta) {
           parentResolve: cachedResolve
         })
         return {
+          shortCircuit: true,
+          format: 'module',
           source: `
 import { register } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(realUrl)}
@@ -316,12 +318,7 @@ register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(rea
   // For Node.js 16.12.0 and higher.
   async function load (url, context, parentLoad) {
     if (hasIitm(url)) {
-      const { source } = await getSource(url, context, parentLoad)
-      return {
-        source,
-        shortCircuit: true,
-        format: 'module'
-      }
+      return getSource(url, context, parentLoad)
     }
 
     return parentLoad(url, context, parentLoad)
