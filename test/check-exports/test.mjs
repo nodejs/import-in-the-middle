@@ -277,14 +277,14 @@ function getExports (name, loader) {
 
 const NPM_LIST_SEMVER_PARSE = /└──.*@((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)/
 
-function getVersion(name) {
+function getVersion (name) {
   const result = spawnSync('npm', ['list', name, '--depth', '0'], { cwd })
-  const stdout = result.output.toString();
-  const [,version] = stdout.match(NPM_LIST_SEMVER_PARSE)
+  const stdout = result.output.toString()
+  const [, version] = stdout.match(NPM_LIST_SEMVER_PARSE)
   return version
 }
 
-function testLib(name) {
+function testLib (name) {
   const version = getVersion(name)
   try {
     const expected = getExports(name)
