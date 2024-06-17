@@ -103,3 +103,15 @@ jobs:
       - name: Verify Minimum Coverage Is Met
         run: >
           lcov --summary all_lcov.info | grep lines | cut -d' ' -f 4 | cut -d% -f 1 | xargs node -e "x=process.argv[1];console.log(x);assert(+x >= 90)"
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # We only test that exports match on a single node version because many of
+      # the libraries we test do not support older node versions
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - run: npm install
+      - run: npm run test:e2e
