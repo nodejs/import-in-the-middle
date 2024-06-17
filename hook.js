@@ -129,15 +129,32 @@ function isBareSpecifier (specifier) {
  */
 async function processModule ({ srcUrl, context, parentGetSource, parentResolve, excludeDefault }) {
   const exportNames = await getExports(srcUrl, context, parentGetSource)
-  const duplicates = new Set()
+  const starExports = new Set()
   const setters = new Map()
 
-  const addSetter = (name, setter) => {
-    // When doing an `import *` duplicates become undefined, so do the same
+  const addSetter = (name, setter, isStarExport = false) => {
     if (setters.has(name)) {
-      duplicates.add(name)
-      setters.delete(name)
-    } else if (!duplicates.has(name)) {
+      if (isStarExport) {
+        // If there's already a matching star export, delete it
+        if (starExports.has(name)) {
+          setters.delete(name)
+        }
+        // and return so this is excluded
+        return
+      }
+
+      // if we already have this export but it is from a * export, overwrite it
+      if (starExports.has(name)) {
+        starExports.delete(name)
+        setters.set(name, setter)
+      }
+    } else {
+      // Store export * exports so we know they can be overridden by explicit
+      // named exports
+      if (isStarExport) {
+        starExports.add(name)
+      }
+
       setters.set(name, setter)
     }
   }
@@ -161,10 +178,11 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
         srcUrl: modUrl,
         context,
         parentGetSource,
+        parentResolve,
         excludeDefault: true
       })
       for (const [name, setter] of setters.entries()) {
-        addSetter(name, setter)
+        addSetter(name, setter, true)
       }
     } else {
       addSetter(n, `
@@ -246,14 +264,16 @@ function createHook (meta) {
   async function getSource (url, context, parentGetSource) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
-      const setters = await processModule({
-        srcUrl: realUrl,
-        context,
-        parentGetSource,
-        parentResolve: cachedResolve
-      })
-      return {
-        source: `
+
+      try {
+        const setters = await processModule({
+          srcUrl: realUrl,
+          context,
+          parentGetSource,
+          parentResolve: cachedResolve
+        })
+        return {
+          source: `
 import { register } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(realUrl)}
 
@@ -268,6 +288,25 @@ ${Array.from(setters.values()).join('\n')}
 
 register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(realUrl))})
 `
+        }
+      } catch (cause) {
+        // If there are other ESM loader hooks registered as well as iitm,
+        // depending on the order they are registered, source might not be
+        // JavaScript.
+        //
+        // If we fail to parse a module for exports, we should fall back to the
+        // parent loader. These modules will not be wrapped with proxies and
+        // cannot be Hook'ed but at least this does not take down the entire app
+        // and block iitm from being used.
+        //
+        // We log the error because there might be bugs in iitm and without this
+        // it would be very tricky to debug
+        const err = new Error(`'import-in-the-middle' failed to wrap '${realUrl}'`)
+        err.cause = cause
+        console.warn(err)
+
+        // Revert back to the non-iitm URL
+        url = realUrl
       }
     }
 

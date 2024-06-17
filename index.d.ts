@@ -27,7 +27,7 @@ export type Options = {
   internals?: boolean
 }
 
-declare class Hook {
+export declare class Hook {
   /**
    * Creates a hook to be run on any already loaded modules and any that will
    * be loaded in the future. It will be run once per loaded module. If
