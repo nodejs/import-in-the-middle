@@ -261,7 +261,7 @@ const otherCommonModulesUsedWithInstrumentation = [
   '@remix-run/react'
 ]
 
-const modules = [...mostPopular240NpmModules, otherCommonModulesUsedWithInstrumentation]
+const modules = [...mostPopular240NpmModules, ...otherCommonModulesUsedWithInstrumentation]
 
 function installLibs (names) {
   spawnSync('npm', ['init', '-y'], { cwd })
