@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url'
 const cwd = dirname(fileURLToPath(import.meta.url))
 const hook = resolve(cwd, '..', '..', 'hook.mjs')
 
-const modules = [
+const mostPopular240NpmModules = [
   'ansi-styles',
   'semver',
   'supports-color',
@@ -245,7 +245,10 @@ const modules = [
   'parse5',
   'asynckit',
   'tmp',
-  'combined-stream',
+  'combined-stream'
+]
+
+const otherCommonModulesUsedWithInstrumentation = [
   'express',
   'fastify',
   '@hapi/hapi',
@@ -257,6 +260,8 @@ const modules = [
   '@remix-run/node',
   '@remix-run/react'
 ]
+
+const modules = [...mostPopular240NpmModules, otherCommonModulesUsedWithInstrumentation]
 
 function installLibs (names) {
   spawnSync('npm', ['init', '-y'], { cwd })
