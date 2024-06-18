@@ -112,6 +112,6 @@ jobs:
       # the libraries we test do not support older node versions
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.x'
+          node-version: 'lts'
       - run: npm install
       - run: npm run test:e2e
