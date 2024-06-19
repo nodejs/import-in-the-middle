@@ -70,7 +70,7 @@ function Hook (modules, options, hookFn) {
             if (internals) {
               name = name + path.sep + path.relative(baseDir, fileURLToPath(filename))
             } else {
-              if (!baseDir.endsWith(specifiers.get(filename))) continue
+              // if (!baseDir.endsWith(specifiers.get(filename))) continue
             }
           }
           callHookFn(hookFn, namespace, name, baseDir)
