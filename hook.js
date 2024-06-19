@@ -290,20 +290,22 @@ register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(rea
 `
         }
       } catch (cause) {
-        // If there are other ESM loader hooks registered as well as iitm,
-        // depending on the order they are registered, source might not be
-        // JavaScript.
-        //
-        // If we fail to parse a module for exports, we should fall back to the
-        // parent loader. These modules will not be wrapped with proxies and
-        // cannot be Hook'ed but at least this does not take down the entire app
-        // and block iitm from being used.
-        //
-        // We log the error because there might be bugs in iitm and without this
-        // it would be very tricky to debug
-        const err = new Error(`'import-in-the-middle' failed to wrap '${realUrl}'`)
-        err.cause = cause
-        console.warn(err)
+        if (!process.env.DISABLE_IITM_WARNINGS) {
+          // If there are other ESM loader hooks registered as well as iitm,
+          // depending on the order they are registered, source might not be
+          // JavaScript.
+          //
+          // If we fail to parse a module for exports, we should fall back to the
+          // parent loader. These modules will not be wrapped with proxies and
+          // cannot be Hook'ed but at least this does not take down the entire app
+          // and block iitm from being used.
+          //
+          // We log the error because there might be bugs in iitm and without this
+          // it would be very tricky to debug
+          const err = new Error(`'import-in-the-middle' failed to wrap '${realUrl}'`)
+          err.cause = cause
+          console.warn(err, '\n\nThese warnings can be disabled by setting the DISABLE_IITM_WARNINGS environment variable to true.\n')
+        }
 
         // Revert back to the non-iitm URL
         url = realUrl
