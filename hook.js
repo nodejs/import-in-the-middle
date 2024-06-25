@@ -135,7 +135,7 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
 
   const addSetter = (name, setter, isStarExport = false) => {
     if (!isIdentifierName(name)) {
-      throw new Error(`'${name}' is not a valid ESM identifier name`)
+      throw new Error(`'${name}' export is not a valid identifier name`)
     }
 
     if (setters.has(name)) {
