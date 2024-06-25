@@ -3,6 +3,7 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
 const { URL } = require('url')
+const { isIdentifierName } = require('@babel/helper-validator-identifier')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
 
@@ -133,6 +134,10 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
   const setters = new Map()
 
   const addSetter = (name, setter, isStarExport = false) => {
+    if (!isIdentifierName(name)) {
+      throw new Error(`'${name}' is not a valid ESM identifier name`)
+    }
+
     if (setters.has(name)) {
       if (isStarExport) {
         // If there's already a matching star export, delete it
@@ -261,7 +266,8 @@ function createHook (meta) {
     }
   }
 
-  async function getSource (url, context, parentGetSource) {
+  // For Node.js 16.12.0 and higher.
+  async function load (url, context, parentGetSource) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
 
@@ -273,6 +279,8 @@ function createHook (meta) {
           parentResolve: cachedResolve
         })
         return {
+          shortCircuit: true,
+          format: 'module',
           source: `
 import { register } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(realUrl)}
@@ -313,27 +321,13 @@ register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(rea
     return parentGetSource(url, context, parentGetSource)
   }
 
-  // For Node.js 16.12.0 and higher.
-  async function load (url, context, parentLoad) {
-    if (hasIitm(url)) {
-      const { source } = await getSource(url, context, parentLoad)
-      return {
-        source,
-        shortCircuit: true,
-        format: 'module'
-      }
-    }
-
-    return parentLoad(url, context, parentLoad)
-  }
-
   if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
     return { load, resolve }
   } else {
     return {
       load,
       resolve,
-      getSource,
+      getSource: load,
       getFormat (url, context, parentGetFormat) {
         if (hasIitm(url)) {
           return {
