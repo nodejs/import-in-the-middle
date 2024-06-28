@@ -22,6 +22,9 @@
     "hook",
     "hooks"
   ],
+  "engines": {
+    "node": ">=12.0.0"
+  },
   "author": "Bryan English <bryan.english@datadoghq.com>",
   "license": "Apache-2.0",
   "bugs": {
