@@ -3,9 +3,9 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
 const path = require('path')
-const parse = require('module-details-from-path')
 const { fileURLToPath } = require('url')
 
+const moduleDetailsFromPath = require('./lib/module-details-from-path')
 const {
   importHooks,
   specifiers,
@@ -56,7 +56,7 @@ function Hook (modules, options, hookFn) {
           name = fileURLToPath(name)
         } catch (e) {}
       }
-      const details = parse(name)
+      const details = moduleDetailsFromPath(name)
       if (details) {
         name = details.name
         baseDir = details.basedir
