@@ -212,7 +212,7 @@ function createHook (meta) {
   async function resolve (specifier, context, parentResolve) {
     cachedResolve = parentResolve
 
-    // See github.com/DataDog/import-in-the-middle/pull/76.
+    // See github.com/nodejs/import-in-the-middle/pull/76.
     if (specifier === iitmURL) {
       return {
         url: specifier,
