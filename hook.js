@@ -3,6 +3,7 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
 const { URL } = require('url')
+const { inspect } = require('util')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
 
@@ -115,6 +116,14 @@ function isBareSpecifier (specifier) {
   }
 }
 
+function emitWarning (err) {
+  // Unfortunately, process.emitWarning does not output the full error
+  // with error.cause like console.warn does so we need to inspect it when
+  // tracing warnings
+  const warnMessage = process.execArgv.includes('--trace-warnings') ? inspect(err) : err
+  process.emitWarning(warnMessage)
+}
+
 /**
  * Processes a module's exports and builds a set of setter blocks.
  *
@@ -212,7 +221,7 @@ function createHook (meta) {
   async function resolve (specifier, context, parentResolve) {
     cachedResolve = parentResolve
 
-    // See github.com/DataDog/import-in-the-middle/pull/76.
+    // See github.com/nodejs/import-in-the-middle/pull/76.
     if (specifier === iitmURL) {
       return {
         url: specifier,
@@ -303,7 +312,7 @@ register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(rea
         // it would be very tricky to debug
         const err = new Error(`'import-in-the-middle' failed to wrap '${realUrl}'`)
         err.cause = cause
-        console.warn(err)
+        emitWarning(err)
 
         // Revert back to the non-iitm URL
         url = realUrl
