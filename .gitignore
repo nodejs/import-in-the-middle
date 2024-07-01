@@ -3,3 +3,4 @@ yarn.lock
 node_modules
 coverage
 .DS_Store
+test/check-exports/package.json
