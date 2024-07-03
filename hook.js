@@ -217,6 +217,14 @@ function addIitm (url) {
 function createHook (meta) {
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
+  let includeLibs, excludeLibs
+
+  async function initialize (options) {
+    if (options) {
+      includeLibs = options && Array.isArray(options.include) ? options.include : undefined
+      excludeLibs = options && Array.isArray(options.exclude) ? options.exclude : undefined
+    }
+  }
 
   async function resolve (specifier, context, parentResolve) {
     cachedResolve = parentResolve
@@ -234,14 +242,22 @@ function createHook (meta) {
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
     }
-    const url = await parentResolve(newSpecifier, context, parentResolve)
-    if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
-      entrypoint = url.url
-      return { url: url.url, format: 'commonjs' }
+    const result = await parentResolve(newSpecifier, context, parentResolve)
+    if (parentURL === '' && !EXTENSION_RE.test(result.url)) {
+      entrypoint = result.url
+      return { url: result.url, format: 'commonjs' }
+    }
+
+    if (includeLibs && !includeLibs.some(lib => lib === specifier || lib === result.url.url)) {
+      return result
+    }
+
+    if (excludeLibs && excludeLibs.some(lib => lib === specifier || lib === result.url.url)) {
+      return result
     }
 
     if (isIitm(parentURL, meta) || hasIitm(parentURL)) {
-      return url
+      return result
     }
 
     // Node.js v21 renames importAssertions to importAttributes
@@ -249,24 +265,24 @@ function createHook (meta) {
       (context.importAssertions && context.importAssertions.type === 'json') ||
       (context.importAttributes && context.importAttributes.type === 'json')
     ) {
-      return url
+      return result
     }
 
     // If the file is referencing itself, we need to skip adding the iitm search params
-    if (url.url === parentURL) {
+    if (result.url === parentURL) {
       return {
-        url: url.url,
+        url: result.url,
         shortCircuit: true,
-        format: url.format
+        format: result.format
       }
     }
 
-    specifiers.set(url.url, specifier)
+    specifiers.set(result.url, specifier)
 
     return {
-      url: addIitm(url.url),
+      url: addIitm(result.url),
       shortCircuit: true,
-      format: url.format
+      format: result.format
     }
   }
 
@@ -337,9 +353,10 @@ register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(rea
   }
 
   if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
-    return { load, resolve }
+    return { initialize, load, resolve }
   } else {
     return {
+      initialize,
       load,
       resolve,
       getSource,
