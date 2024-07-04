@@ -217,12 +217,12 @@ function addIitm (url) {
 function createHook (meta) {
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
-  let includeLibs, excludeLibs
+  let includeModules, excludeModules
 
-  async function initialize (options) {
-    if (options) {
-      includeLibs = options && Array.isArray(options.include) ? options.include : undefined
-      excludeLibs = options && Array.isArray(options.exclude) ? options.exclude : undefined
+  async function initialize (data) {
+    if (data) {
+      includeModules = Array.isArray(data.include) ? data.include : undefined
+      excludeModules = Array.isArray(data.exclude) ? data.exclude : undefined
     }
   }
 
@@ -248,11 +248,17 @@ function createHook (meta) {
       return { url: result.url, format: 'commonjs' }
     }
 
-    if (includeLibs && !includeLibs.some(lib => lib === specifier || lib === result.url.url)) {
+    // For included/excluded modules, we check the specifier to match libraries
+    // that are loaded with bare specifiers from node_modules.
+    //
+    // For non-bare specifier imports, the specifier will be a relative path
+    // which is next to useless for matching. For this reason, we allow matching
+    // to the full URL string.
+    if (includeModules && !includeModules.some(lib => lib === specifier || lib === result.url.url)) {
       return result
     }
 
-    if (excludeLibs && excludeLibs.some(lib => lib === specifier || lib === result.url.url)) {
+    if (excludeModules && excludeModules.some(lib => lib === specifier || lib === result.url.url)) {
       return result
     }
 
