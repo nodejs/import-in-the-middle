@@ -8,7 +8,7 @@ import path from 'path'
 
 const filename = process.env.IITM_TEST_FILE
 
-export const { load, resolve, getFormat, getSource } =
-  filename.includes('disabled')
+export const { initialize, load, resolve, getFormat, getSource } =
+  filename.includes('disabled') || filename.includes('register')
     ? {}
     : (path.extname(filename).slice(-2) === 'ts' ? tsLoader : regularLoader)

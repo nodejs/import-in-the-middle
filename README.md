@@ -38,6 +38,39 @@ command-line option.
 --loader=import-in-the-middle/hook.mjs
 ```
 
+It's also possible to register the loader hook programmatically via the Node
+[`module.register()`](https://nodejs.org/api/module.html#moduleregisterspecifier-parenturl-options)
+API. However, for this to be able to hook non-dynamic imports, it needs to be
+loaded before your app code is evaluated via the `--import` command-line option.
+
+`my-loader.mjs`
+```js
+import * as module from 'module'
+
+module.register('import-in-the-middle/hook.mjs', import.meta.url)
+```
+```shell
+node --import=./my-loader.mjs ./my-code.mjs
+```
+
+When registering the loader hook programmatically, it's possible to pass a list
+of modules or file URLs to either exclude or specifically include which modules
+are intercepted. This is useful if a module is not compatible with the loader
+hook. 
+```js
+import * as module from 'module'
+
+// Exclude intercepting a specific module by name
+module.register('import-in-the-middle/hook.mjs', import.meta.url, {
+  data: { exclude: ['package-i-want-to-exclude'] }
+})
+
+// Only intercept a specific module by name
+module.register('import-in-the-middle/hook.mjs', import.meta.url, {
+  data: { include: ['package-i-want-to-include'] }
+})
+```
+
 ## Limitations
 
 * You cannot add new exports to a module. You can only modify existing ones.
