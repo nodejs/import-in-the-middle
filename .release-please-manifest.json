@@ -1,0 +1,4 @@
+{
+  "pull-request-title-pattern": "chore: release v${version}",
+  "changelog-type": "github"
+}
