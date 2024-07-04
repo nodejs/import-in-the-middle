@@ -283,9 +283,8 @@ function createHook (meta) {
     // For included/excluded modules, we check the specifier to match libraries
     // that are loaded with bare specifiers from node_modules.
     //
-    // For non-bare specifier imports, the specifier will be a relative path
-    // which is next to useless for matching. For this reason, we allow matching
-    // to the full URL string.
+    // For non-bare specifier imports, we only support matching file URL strings
+    // because using relative paths would be very error prone!
     if (includeModules && !includeModules.some(lib => lib === specifier || lib === result.url.url)) {
       return result
     }
