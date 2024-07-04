@@ -116,6 +116,38 @@ function isBareSpecifier (specifier) {
   }
 }
 
+function isBareSpecifierOrFileUrl (input) {
+  // Relative and absolute paths
+  if (
+    input.startsWith('.') ||
+    input.startsWith('/')) {
+    return false
+  }
+
+  try {
+    // eslint-disable-next-line no-new
+    const url = new URL(input)
+    return url.protocol === 'file:'
+  } catch (err) {
+    // Anything that fails parsing is a bare specifier
+    return true
+  }
+}
+
+function ensureArrayWithBareSpecifiersAndFileUrls (array, type) {
+  if (!Array.isArray(array)) {
+    return undefined
+  }
+
+  const invalid = array.filter(s => !isBareSpecifierOrFileUrl(s))
+
+  if (invalid.length) {
+    throw new Error(`'${type}' option only supports bare specifiers and file URLs. Invalid entries: ${inspect(invalid)}`)
+  }
+
+  return array
+}
+
 function emitWarning (err) {
   // Unfortunately, process.emitWarning does not output the full error
   // with error.cause like console.warn does so we need to inspect it when
@@ -221,8 +253,8 @@ function createHook (meta) {
 
   async function initialize (data) {
     if (data) {
-      includeModules = Array.isArray(data.include) ? data.include : undefined
-      excludeModules = Array.isArray(data.exclude) ? data.exclude : undefined
+      includeModules = ensureArrayWithBareSpecifiersAndFileUrls(data.include, 'include')
+      excludeModules = ensureArrayWithBareSpecifiersAndFileUrls(data.exclude, 'exclude')
     }
   }
 
