@@ -292,6 +292,11 @@ function createHook (meta) {
       return result
     }
 
+    // We don't want to attempt to wrap native modules
+    if (result.url.endsWith('.node')) {
+      return result
+    }
+
     // Node.js v21 renames importAssertions to importAttributes
     if (
       (context.importAssertions && context.importAssertions.type === 'json') ||
