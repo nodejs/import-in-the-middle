@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.9.0...import-in-the-middle-v1.9.1) (2024-07-15)
+
+
+### Bug Fixes
+
+* Don't wrap native modules ([#142](https://github.com/nodejs/import-in-the-middle/issues/142)) ([f3278a3](https://github.com/nodejs/import-in-the-middle/commit/f3278a3c76af78fe369b599d5b2bf1d87edf0a7a))
+* Use correct `format` when resolving exports from sub-modules ([#140](https://github.com/nodejs/import-in-the-middle/issues/140)) ([1db08ef](https://github.com/nodejs/import-in-the-middle/commit/1db08ef5f51346c20b4b3c313bf993e9cf1ca7d5))
+
 ## [1.9.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.8.1...import-in-the-middle-v1.9.0) (2024-07-08)
 
 
