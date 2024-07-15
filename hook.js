@@ -297,7 +297,8 @@ function createHook (meta) {
       return result
     }
 
-    if (!result.url.endsWith('.node')) {
+    // We don't want to attempt to wrap native modules
+    if (result.url.endsWith('.node')) {
       return result
     }
 
