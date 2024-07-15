@@ -206,24 +206,19 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
     if (isStarExportLine(n) === true) {
       const [, modFile] = n.split('* from ')
 
-      let modUrl
+      async function processSubModule (url, ctx) {
+        const setters = await processModule({ srcUrl: url, context: ctx, parentGetSource, parentResolve, excludeDefault: true })
+        for (const [name, setter] of setters.entries()) {
+          addSetter(name, setter, true)
+        }
+      }
+
       if (isBareSpecifier(modFile)) {
         // Bare specifiers need to be resolved relative to the parent module.
         const result = await parentResolve(modFile, { parentURL: srcUrl })
-        modUrl = result.url
+        await processSubModule(result.url, { ...context, format: result.format })
       } else {
-        modUrl = new URL(modFile, srcUrl).href
-      }
-
-      const setters = await processModule({
-        srcUrl: modUrl,
-        context,
-        parentGetSource,
-        parentResolve,
-        excludeDefault: true
-      })
-      for (const [name, setter] of setters.entries()) {
-        addSetter(name, setter, true)
+        await processSubModule(new URL(modFile, srcUrl).href, context)
       }
     } else {
       addSetter(n, `
