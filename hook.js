@@ -206,19 +206,24 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
     if (isStarExportLine(n) === true) {
       const [, modFile] = n.split('* from ')
 
-      async function processSubModule (url, ctx) {
-        const setters = await processModule({ srcUrl: url, context: ctx, parentGetSource, parentResolve, excludeDefault: true })
-        for (const [name, setter] of setters.entries()) {
-          addSetter(name, setter, true)
-        }
-      }
+      // Relative paths need to be resolved relative to the parent module
+      const newSpecifier = isBareSpecifier(modFile) ? modFile : new URL(modFile, srcUrl).href
+      // We need to call `parentResolve` to resolve bare specifiers to a full
+      // URL. We also need to call `parentResolve` for all sub-modules to get
+      // the `format`. We can't rely on the parents `format` to know if this
+      // sub-module is ESM or CJS!
+      const result = await parentResolve(newSpecifier, { parentURL: srcUrl })
 
-      if (isBareSpecifier(modFile)) {
-        // Bare specifiers need to be resolved relative to the parent module.
-        const result = await parentResolve(modFile, { parentURL: srcUrl })
-        await processSubModule(result.url, { ...context, format: result.format })
-      } else {
-        await processSubModule(new URL(modFile, srcUrl).href, context)
+      const subSetters = await processModule({
+        srcUrl: result.url,
+        context: { ...context, format: result.format },
+        parentGetSource,
+        parentResolve,
+        excludeDefault: true
+      })
+
+      for (const [name, setter] of subSetters.entries()) {
+        addSetter(name, setter, true)
       }
     } else {
       addSetter(n, `
