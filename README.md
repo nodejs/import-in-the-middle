@@ -74,7 +74,8 @@ module.register('import-in-the-middle/hook.mjs', import.meta.url, {
 ### Only Intercepting Hooked modules
 
 If you are `Hook`'ing all modules before they are imported, for example in a
-module loaded via the Node.js `--import` argument, you can configure the loader hook to only intercept those specific modules:
+module loaded via the Node.js `--import` argument, you can configure the loader
+hook to only intercept those specific modules: 
 
 `instrument.mjs`
 ```js
