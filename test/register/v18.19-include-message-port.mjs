@@ -9,6 +9,6 @@ if (out.error) {
   console.error(out.error)
 }
 if (out.status !== 0) {
-  console.error(out.stderr.toString())
+  console.error(`Expected exit code 0, got ${out.status}`)
 }
 process.exit(out.status)
