@@ -34,11 +34,11 @@ console.log(foo) // 1 more than whatever that module exported
 This requires the use of an ESM loader hook, which can be added with the following
 command-line option.
 
-```
---loader=import-in-the-middle/hook.mjs
+```shell
+node --loader=import-in-the-middle/hook.mjs my-app.mjs
 ```
 
-It's also possible to register the loader hook programmatically via the Node
+Since `--loader` has been deprecated you cab also register the loader hook programmatically via the Node
 [`module.register()`](https://nodejs.org/api/module.html#moduleregisterspecifier-parenturl-options)
 API. However, for this to be able to hook non-dynamic imports, it needs to be
 loaded before your app code is evaluated via the `--import` command-line option.
@@ -69,6 +69,40 @@ module.register('import-in-the-middle/hook.mjs', import.meta.url, {
 module.register('import-in-the-middle/hook.mjs', import.meta.url, {
   data: { include: ['package-i-want-to-include'] }
 })
+```
+
+### Only Intercepting Hooked modules
+
+If you are `Hook`'ing all modules before they are imported, for example in a
+module loaded via the Node.js `--import` argument, you can configure the loader hook to only intercept those specific modules:
+
+`instrument.mjs`
+```js
+import { register } from 'module'
+import { Hook, createAddHookMessageChannel } from 'import-in-the-middle'
+
+const addHookMessagePort = createAddHookMessageChannel()
+
+const options = { 
+  data: { addHookMessagePort }, 
+  transferList: [addHookMessagePort] 
+}
+
+register('import-in-the-middle/hook.mjs', import.meta.url, options)
+
+Hook(['fs'], (exported, name, baseDir) => {
+  // Instrument the fs module
+})
+```
+`my-app.mjs`
+```js
+import * as fs from 'fs'
+// fs will be instrumented!
+fs.readFileSync('file.txt')
+```
+
+```shell
+node --import=./instrument.mjs ./my-app.mjs
 ```
 
 ## Limitations
