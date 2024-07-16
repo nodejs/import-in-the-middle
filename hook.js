@@ -250,6 +250,16 @@ function createHook (meta) {
     if (data) {
       includeModules = ensureArrayWithBareSpecifiersAndFileUrls(data.include, 'include')
       excludeModules = ensureArrayWithBareSpecifiersAndFileUrls(data.exclude, 'exclude')
+
+      if (data.addHookMessagePort) {
+        data.addHookMessagePort.on('message', (modules) => {
+          if (includeModules === undefined) {
+            includeModules = []
+          }
+
+          includeModules.push(...modules)
+        })
+      }
     }
   }
 

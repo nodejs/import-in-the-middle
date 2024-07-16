@@ -5,6 +5,7 @@
 const path = require('path')
 const parse = require('module-details-from-path')
 const { fileURLToPath } = require('url')
+const { MessageChannel } = require('worker_threads')
 
 const {
   importHooks,
@@ -31,6 +32,18 @@ function callHookFn (hookFn, namespace, name, baseDir) {
   }
 }
 
+let sendToMessageChannel
+
+function createAddHookMessageChannel() {
+  const { port1, port2 } = new MessageChannel()
+
+  sendToMessageChannel = (modules) => {
+    port1.postMessage(modules)
+  }
+
+  return port2
+}
+
 function Hook (modules, options, hookFn) {
   if ((this instanceof Hook) === false) return new Hook(modules, options, hookFn)
   if (typeof modules === 'function') {
@@ -42,6 +55,10 @@ function Hook (modules, options, hookFn) {
     options = null
   }
   const internals = options ? options.internals === true : false
+
+  if (sendToMessageChannel && Array.isArray(modules)) {
+    sendToMessageChannel(modules)
+  }
 
   this._iitmHook = (name, namespace) => {
     const filename = name
@@ -92,3 +109,4 @@ module.exports = Hook
 module.exports.Hook = Hook
 module.exports.addHook = addHook
 module.exports.removeHook = removeHook
+module.exports.createAddHookMessageChannel = createAddHookMessageChannel
