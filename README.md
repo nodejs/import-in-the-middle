@@ -38,10 +38,10 @@ command-line option.
 node --loader=import-in-the-middle/hook.mjs my-app.mjs
 ```
 
-Since `--loader` has been deprecated you cab also register the loader hook programmatically via the Node
+Since `--loader` has been deprecated you can also register the loader hook programmatically via the Node
 [`module.register()`](https://nodejs.org/api/module.html#moduleregisterspecifier-parenturl-options)
 API. However, for this to be able to hook non-dynamic imports, it needs to be
-loaded before your app code is evaluated via the `--import` command-line option.
+registered before your app code is evaluated via the `--import` command-line option.
 
 `my-loader.mjs`
 ```js
