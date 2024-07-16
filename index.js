@@ -34,7 +34,7 @@ function callHookFn (hookFn, namespace, name, baseDir) {
 
 let sendToMessageChannel
 
-function createAddHookMessageChannel() {
+function createAddHookMessageChannel () {
   const { port1, port2 } = new MessageChannel()
 
   sendToMessageChannel = (modules) => {
