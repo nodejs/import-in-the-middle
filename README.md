@@ -74,26 +74,27 @@ module.register('import-in-the-middle/hook.mjs', import.meta.url, {
 ### Only Intercepting Hooked modules
 
 If you are `Hook`'ing all modules before they are imported, for example in a
-module loaded via the Node.js `--import` argument, you can configure the loader
-hook to only intercept those specific modules: 
+module loaded via the Node.js `--import` CLI argument, you can configure the
+loader to intercept only modules that were specifically hooked.
 
 `instrument.mjs`
 ```js
 import { register } from 'module'
 import { Hook, createAddHookMessageChannel } from 'import-in-the-middle'
 
-const addHookMessagePort = createAddHookMessageChannel()
+const { addHookMessagePort, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
 
-const options = { 
-  data: { addHookMessagePort }, 
-  transferList: [addHookMessagePort] 
-}
+const options = { data: { addHookMessagePort }, transferList: [addHookMessagePort] }
 
 register('import-in-the-middle/hook.mjs', import.meta.url, options)
 
 Hook(['fs'], (exported, name, baseDir) => {
   // Instrument the fs module
 })
+
+// Ensure that the loader has acknowledged all the modules 
+// before we allow execution to continue
+await waitForAllMessagesAcknowledged()
 ```
 `my-app.mjs`
 ```js

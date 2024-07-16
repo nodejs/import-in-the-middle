@@ -263,7 +263,8 @@ function createHook (meta) {
           }
 
           includeModules.push(...modules)
-        })
+          data.addHookMessagePort.postMessage('ack')
+        }).unref()
       }
     }
   }
@@ -271,7 +272,7 @@ function createHook (meta) {
   async function resolve (specifier, context, parentResolve) {
     cachedResolve = parentResolve
 
-    // See github.com/nodejs/import-in-the-middle/pull/76.
+    // See https://github.com/nodejs/import-in-the-middle/pull/76.
     if (specifier === iitmURL) {
       return {
         url: specifier,

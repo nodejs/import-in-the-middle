@@ -32,16 +32,39 @@ function callHookFn (hookFn, namespace, name, baseDir) {
   }
 }
 
-let sendToMessageChannel
+let sendModulesToLoader
 
 function createAddHookMessageChannel () {
   const { port1, port2 } = new MessageChannel()
+  let pendingAckCount = 0
+  let resolveFn
 
-  sendToMessageChannel = (modules) => {
+  sendModulesToLoader = (modules) => {
+    pendingAckCount++
     port1.postMessage(modules)
   }
 
-  return port2
+  port1.on('message', () => {
+    pendingAckCount--
+
+    if (resolveFn && pendingAckCount <= 0) {
+      resolveFn()
+    }
+  }).unref()
+
+  function waitForAllMessagesAcknowledged () {
+    const promise = new Promise((resolve) => {
+      resolveFn = resolve
+    })
+
+    if (pendingAckCount === 0) {
+      resolveFn()
+    }
+
+    return promise
+  }
+
+  return { addHookMessagePort: port2, waitForAllMessagesAcknowledged }
 }
 
 function Hook (modules, options, hookFn) {
@@ -56,8 +79,8 @@ function Hook (modules, options, hookFn) {
   }
   const internals = options ? options.internals === true : false
 
-  if (sendToMessageChannel && Array.isArray(modules)) {
-    sendToMessageChannel(modules)
+  if (sendModulesToLoader && Array.isArray(modules)) {
+    sendModulesToLoader(modules)
   }
 
   this._iitmHook = (name, namespace) => {
