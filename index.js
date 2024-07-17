@@ -53,9 +53,12 @@ function createAddHookMessageChannel () {
   }).unref()
 
   function waitForAllMessagesAcknowledged () {
+    // This timer is to prevent the process from exiting with code 13:
+    // 13: Unsettled Top-Level Await.
+    const timer = setInterval(() => { }, 1000)
     const promise = new Promise((resolve) => {
       resolveFn = resolve
-    })
+    }).then(() => { clearInterval(timer) })
 
     if (pendingAckCount === 0) {
       resolveFn()
