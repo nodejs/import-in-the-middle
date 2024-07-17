@@ -111,4 +111,4 @@ export declare function removeHook(hookFn: HookFunction): void
  * await waitForAllMessagesAcknowledged()
  * ```
  */
-export declare function createAddHookMessageChannel(): MessagePort;
+export declare function createAddHookMessageChannel(): { addHookMessagePort: MessagePort, waitForAllMessagesAcknowledged: Promise<void> };
