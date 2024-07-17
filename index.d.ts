@@ -94,11 +94,21 @@ export declare function removeHook(hookFn: HookFunction): void
  *
  * ```ts
  * import { register } from 'module'
- * import { createAddHookMessageChannel } from 'import-in-the-middle'
+ * import { Hook, createAddHookMessageChannel } from 'import-in-the-middle'
  *
- * const addHookMessagePort = createAddHookMessageChannel()
+ * const { addHookMessagePort, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
  *
- * register('import-in-the-middle/hook.mjs', import.meta.url, { data: { addHookMessagePort }, transferList: [addHookMessagePort] })
+ * const options = { data: { addHookMessagePort }, transferList: [addHookMessagePort] }
+ *
+ * register('import-in-the-middle/hook.mjs', import.meta.url, options)
+ *
+ * Hook(['fs'], (exported, name, baseDir) => {
+ *   // Instrument the fs module
+ * })
+ *
+ * // Ensure that the loader has acknowledged all the modules
+ * // before we allow execution to continue
+ * await waitForAllMessagesAcknowledged()
  * ```
  */
 export declare function createAddHookMessageChannel(): MessagePort;
