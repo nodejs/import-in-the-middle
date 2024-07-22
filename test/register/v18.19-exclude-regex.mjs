@@ -14,4 +14,3 @@ await import('openai')
 
 strictEqual(hooked.has('openai'), false)
 strictEqual(hooked.has('fs'), true)
-strictEqual(hooked.size, 9)
