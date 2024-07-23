@@ -85,6 +85,12 @@ export declare function addHook(hookFn: HookFunction): void
  */
 export declare function removeHook(hookFn: HookFunction): void
 
+type CreateAddHookMessageChannelReturn<Data> = {
+  addHookMessagePort: MessagePort,
+  waitForAllMessagesAcknowledged: Promise<void>
+  registerOptions: { data?: Data; transferList?: any[]; }
+}
+
 /**
  * Creates a message channel with a port that can be used to add hooks to the
  * list of exclusively included modules.
@@ -111,4 +117,4 @@ export declare function removeHook(hookFn: HookFunction): void
  * await waitForAllMessagesAcknowledged()
  * ```
  */
-export declare function createAddHookMessageChannel(): { addHookMessagePort: MessagePort, waitForAllMessagesAcknowledged: Promise<void> };
+export declare function createAddHookMessageChannel<Data = any>(): CreateAddHookMessageChannelReturn<Data>;

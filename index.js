@@ -67,7 +67,10 @@ function createAddHookMessageChannel () {
     return promise
   }
 
-  return { addHookMessagePort: port2, waitForAllMessagesAcknowledged }
+  const addHookMessagePort = port2
+  const registerOptions = { data: { addHookMessagePort, include: [] }, transferList: [addHookMessagePort] }
+
+  return { registerOptions, addHookMessagePort, waitForAllMessagesAcknowledged }
 }
 
 function Hook (modules, options, hookFn) {

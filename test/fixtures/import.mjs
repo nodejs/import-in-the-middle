@@ -4,9 +4,9 @@ import { Hook, createAddHookMessageChannel } from '../../index.js'
 // if the library is used here.
 import * as path from 'path'
 
-const { addHookMessagePort, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
+const { registerOptions, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
 
-register('../../hook.mjs', import.meta.url, { data: { addHookMessagePort }, transferList: [addHookMessagePort] })
+register('../../hook.mjs', import.meta.url, registerOptions)
 
 Hook(['path'], (exports) => {
   exports.sep = '@'
