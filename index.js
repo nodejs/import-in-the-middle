@@ -34,6 +34,30 @@ function callHookFn (hookFn, namespace, name, baseDir) {
 
 let sendModulesToLoader
 
+/**
+ * Creates a message channel with a port that can be used to add hooks to the
+ * list of exclusively included modules.
+ *
+ * This can be used to only wrap modules that are Hook'ed, however modules need
+ * to be hooked before they are imported.
+ *
+ * ```ts
+ * import { register } from 'module'
+ * import { Hook, createAddHookMessageChannel } from 'import-in-the-middle'
+ *
+ * const { registerOptions, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
+ *
+ * register('import-in-the-middle/hook.mjs', import.meta.url, registerOptions)
+ *
+ * Hook(['fs'], (exported, name, baseDir) => {
+ *   // Instrument the fs module
+ * })
+ *
+ * // Ensure that the loader has acknowledged all the modules
+ * // before we allow execution to continue
+ * await waitForAllMessagesAcknowledged()
+ * ```
+ */
 function createAddHookMessageChannel () {
   const { port1, port2 } = new MessageChannel()
   let pendingAckCount = 0
