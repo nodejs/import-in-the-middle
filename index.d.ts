@@ -102,11 +102,9 @@ type CreateAddHookMessageChannelReturn<Data> = {
  * import { register } from 'module'
  * import { Hook, createAddHookMessageChannel } from 'import-in-the-middle'
  *
- * const { addHookMessagePort, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
+ * const { registerOptions, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
  *
- * const options = { data: { addHookMessagePort }, transferList: [addHookMessagePort] }
- *
- * register('import-in-the-middle/hook.mjs', import.meta.url, options)
+ * register('import-in-the-middle/hook.mjs', import.meta.url, registerOptions)
  *
  * Hook(['fs'], (exported, name, baseDir) => {
  *   // Instrument the fs module
