@@ -116,7 +116,11 @@ function isBareSpecifier (specifier) {
   }
 }
 
-function isBareSpecifierOrFileUrl (input) {
+function isBareSpecifierFileUrlOrRegex (input) {
+  if (input instanceof RegExp) {
+    return true
+  }
+
   // Relative and absolute paths
   if (
     input.startsWith('.') ||
@@ -134,15 +138,15 @@ function isBareSpecifierOrFileUrl (input) {
   }
 }
 
-function ensureArrayWithBareSpecifiersAndFileUrls (array, type) {
+function ensureArrayWithBareSpecifiersFileUrlsAndRegex (array, type) {
   if (!Array.isArray(array)) {
     return undefined
   }
 
-  const invalid = array.filter(s => !isBareSpecifierOrFileUrl(s))
+  const invalid = array.filter(s => !isBareSpecifierFileUrlOrRegex(s))
 
   if (invalid.length) {
-    throw new Error(`'${type}' option only supports bare specifiers and file URLs. Invalid entries: ${inspect(invalid)}`)
+    throw new Error(`'${type}' option only supports bare specifiers, file URLs or regular expressions. Invalid entries: ${inspect(invalid)}`)
   }
 
   return array
@@ -253,8 +257,8 @@ function createHook (meta) {
 
   async function initialize (data) {
     if (data) {
-      includeModules = ensureArrayWithBareSpecifiersAndFileUrls(data.include, 'include')
-      excludeModules = ensureArrayWithBareSpecifiersAndFileUrls(data.exclude, 'exclude')
+      includeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.include, 'include')
+      excludeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.exclude, 'exclude')
 
       if (data.addHookMessagePort) {
         data.addHookMessagePort.on('message', (modules) => {
@@ -294,13 +298,21 @@ function createHook (meta) {
     // For included/excluded modules, we check the specifier to match libraries
     // that are loaded with bare specifiers from node_modules.
     //
-    // For non-bare specifier imports, we only support matching file URL strings
-    // because using relative paths would be very error prone!
-    if (includeModules && !includeModules.some(lib => lib === specifier || lib === result.url.url)) {
+    // For non-bare specifier imports, we match to the full file URL because
+    // using relative paths would be very error prone!
+    function match (each) {
+      if (each instanceof RegExp) {
+        return each.test(result.url)
+      }
+
+      return each === specifier || each === result.url
+    }
+
+    if (includeModules && !includeModules.some(match)) {
       return result
     }
 
-    if (excludeModules && excludeModules.some(lib => lib === specifier || lib === result.url.url)) {
+    if (excludeModules && excludeModules.some(match)) {
       return result
     }
 

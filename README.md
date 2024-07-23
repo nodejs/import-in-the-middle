@@ -54,9 +54,9 @@ node --import=./my-loader.mjs ./my-code.mjs
 ```
 
 When registering the loader hook programmatically, it's possible to pass a list
-of modules or file URLs to either exclude or specifically include which modules
-are intercepted. This is useful if a module is not compatible with the loader
-hook. 
+of modules, file URLs or regular expressions to either exclude or specifically
+include which modules are intercepted. This is useful if a module is not
+compatible with the loader hook. 
 ```js
 import * as module from 'module'
 

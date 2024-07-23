@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.9.1...import-in-the-middle-v1.10.0) (2024-07-22)
+
+
+### Features
+
+* Allow regex for `include` and `exclude` options ([#148](https://github.com/nodejs/import-in-the-middle/issues/148)) ([697b0d2](https://github.com/nodejs/import-in-the-middle/commit/697b0d239b9a738f4952bb0f77c521c4a398ac79))
+
+
+### Bug Fixes
+
+* Use correct `format` when resolving exports from relative paths ([#145](https://github.com/nodejs/import-in-the-middle/issues/145)) ([632802f](https://github.com/nodejs/import-in-the-middle/commit/632802f4e7c797215b4e052ffdfa0fbda1780166))
+
 ## [1.9.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.9.0...import-in-the-middle-v1.9.1) (2024-07-15)
 
 
