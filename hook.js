@@ -4,6 +4,7 @@
 
 const { URL } = require('url')
 const { inspect } = require('util')
+const { builtinModules } = require('module')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
 
@@ -131,7 +132,8 @@ function isBareSpecifierFileUrlOrRegex (input) {
   try {
     // eslint-disable-next-line no-new
     const url = new URL(input)
-    return url.protocol === 'file:'
+    // We consider node: URLs bare specifiers in this context
+    return url.protocol === 'file:' || url.protocol === 'node:'
   } catch (err) {
     // Anything that fails parsing is a bare specifier
     return true
@@ -147,6 +149,14 @@ function ensureArrayWithBareSpecifiersFileUrlsAndRegex (array, type) {
 
   if (invalid.length) {
     throw new Error(`'${type}' option only supports bare specifiers, file URLs or regular expressions. Invalid entries: ${inspect(invalid)}`)
+  }
+
+  // Rather than evaluate whether we have a node: scoped built-in-module for
+  // every call to resolve, we just add them to include/exclude now.
+  for (const each of array) {
+    if (typeof each === 'string' && !each.startsWith('node:') && builtinModules.includes(each)) {
+      array.push(`node:${each}`)
+    }
   }
 
   return array
