@@ -117,6 +117,11 @@ function isBareSpecifier (specifier) {
   }
 }
 
+/**
+ * Determines whether the input is a bare specifier, file URL or a regular expression.
+ *
+ * - node: prefixed URL strings are considered bare specifiers in this context.
+ */
 function isBareSpecifierFileUrlOrRegex (input) {
   if (input instanceof RegExp) {
     return true
@@ -140,6 +145,13 @@ function isBareSpecifierFileUrlOrRegex (input) {
   }
 }
 
+/**
+ * Ensure an array only contains bare specifiers, file URLs or regular expressions.
+ *
+ * - We consider node: prefixed URL string as bare specifiers in this context.
+ * - For node built-in modules, we add additional node: prefixed modules to the
+ *   output array.
+ */
 function ensureArrayWithBareSpecifiersFileUrlsAndRegex (array, type) {
   if (!Array.isArray(array)) {
     return undefined
