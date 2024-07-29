@@ -4,6 +4,7 @@
 
 const { URL } = require('url')
 const { inspect } = require('util')
+const { builtinModules } = require('module')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
 
@@ -116,6 +117,11 @@ function isBareSpecifier (specifier) {
   }
 }
 
+/**
+ * Determines whether the input is a bare specifier, file URL or a regular expression.
+ *
+ * - node: prefixed URL strings are considered bare specifiers in this context.
+ */
 function isBareSpecifierFileUrlOrRegex (input) {
   if (input instanceof RegExp) {
     return true
@@ -131,13 +137,21 @@ function isBareSpecifierFileUrlOrRegex (input) {
   try {
     // eslint-disable-next-line no-new
     const url = new URL(input)
-    return url.protocol === 'file:'
+    // We consider node: URLs bare specifiers in this context
+    return url.protocol === 'file:' || url.protocol === 'node:'
   } catch (err) {
     // Anything that fails parsing is a bare specifier
     return true
   }
 }
 
+/**
+ * Ensure an array only contains bare specifiers, file URLs or regular expressions.
+ *
+ * - We consider node: prefixed URL string as bare specifiers in this context.
+ * - For node built-in modules, we add additional node: prefixed modules to the
+ *   output array.
+ */
 function ensureArrayWithBareSpecifiersFileUrlsAndRegex (array, type) {
   if (!Array.isArray(array)) {
     return undefined
@@ -147,6 +161,14 @@ function ensureArrayWithBareSpecifiersFileUrlsAndRegex (array, type) {
 
   if (invalid.length) {
     throw new Error(`'${type}' option only supports bare specifiers, file URLs or regular expressions. Invalid entries: ${inspect(invalid)}`)
+  }
+
+  // Rather than evaluate whether we have a node: scoped built-in-module for
+  // every call to resolve, we just add them to include/exclude now.
+  for (const each of array) {
+    if (typeof each === 'string' && !each.startsWith('node:') && builtinModules.includes(each)) {
+      array.push(`node:${each}`)
+    }
   }
 
   return array
