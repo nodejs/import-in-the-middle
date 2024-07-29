@@ -281,13 +281,31 @@ function createHook (meta) {
     if (data) {
       includeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.include, 'include')
       excludeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.exclude, 'exclude')
+
+      if (data.addHookMessagePort) {
+        data.addHookMessagePort.on('message', (modules) => {
+          if (includeModules === undefined) {
+            includeModules = []
+          }
+
+          for (const each of modules) {
+            if (!each.startsWith('node:') && builtinModules.includes(each)) {
+              includeModules.push(`node:${each}`)
+            }
+
+            includeModules.push(each)
+          }
+
+          data.addHookMessagePort.postMessage('ack')
+        }).unref()
+      }
     }
   }
 
   async function resolve (specifier, context, parentResolve) {
     cachedResolve = parentResolve
 
-    // See github.com/nodejs/import-in-the-middle/pull/76.
+    // See https://github.com/nodejs/import-in-the-middle/pull/76.
     if (specifier === iitmURL) {
       return {
         url: specifier,

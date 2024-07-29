@@ -84,3 +84,39 @@ export declare function addHook(hookFn: HookFunction): void
  * @param {HookFunction} hookFn The function to be removed.
  */
 export declare function removeHook(hookFn: HookFunction): void
+
+type CreateAddHookMessageChannelReturn<Data> = {
+  addHookMessagePort: MessagePort,
+  waitForAllMessagesAcknowledged: Promise<void>
+  registerOptions: { data?: Data; transferList?: any[]; }
+}
+
+/**
+ * EXPERIMENTAL
+ * This feature is experimental and may change in minor versions.
+ * **NOTE** This feature is incompatible with the {internals: true} Hook option.
+ *
+ * Creates a message channel with a port that can be used to add hooks to the
+ * list of exclusively included modules.
+ *
+ * This can be used to only wrap modules that are Hook'ed, however modules need
+ * to be hooked before they are imported.
+ *
+ * ```ts
+ * import { register } from 'module'
+ * import { Hook, createAddHookMessageChannel } from 'import-in-the-middle'
+ *
+ * const { registerOptions, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
+ *
+ * register('import-in-the-middle/hook.mjs', import.meta.url, registerOptions)
+ *
+ * Hook(['fs'], (exported, name, baseDir) => {
+ *   // Instrument the fs module
+ * })
+ *
+ * // Ensure that the loader has acknowledged all the modules
+ * // before we allow execution to continue
+ * await waitForAllMessagesAcknowledged()
+ * ```
+ */
+export declare function createAddHookMessageChannel<Data = any>(): CreateAddHookMessageChannelReturn<Data>;
