@@ -54,9 +54,12 @@ node --import=./my-loader.mjs ./my-code.mjs
 ```
 
 When registering the loader hook programmatically, it's possible to pass a list
-of modules, file URLs or regular expressions to either exclude or specifically
-include which modules are intercepted. This is useful if a module is not
+of modules, file URLs or regular expressions to either `exclude` or specifically
+`include` which modules are intercepted. This is useful if a module is not
 compatible with the loader hook. 
+
+> **Note:** This feature is incompatible with the `{internals: true}` Hook option
+
 ```js
 import * as module from 'module'
 
@@ -71,7 +74,8 @@ module.register('import-in-the-middle/hook.mjs', import.meta.url, {
 })
 ```
 
-### Only Intercepting Hooked modules
+### Only Intercepting Hooked modules 
+> **Note:** This feature is experimental and is incompatible with the `{internals: true}` Hook option
 
 If you are `Hook`'ing all modules before they are imported, for example in a
 module loaded via the Node.js `--import` CLI argument, you can configure the

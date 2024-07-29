@@ -92,6 +92,10 @@ type CreateAddHookMessageChannelReturn<Data> = {
 }
 
 /**
+ * EXPERIMENTAL
+ * This feature is experimental and may change in minor versions.
+ * **NOTE** This feature is incompatible with the {internals: true} Hook option.
+ *
  * Creates a message channel with a port that can be used to add hooks to the
  * list of exclusively included modules.
  *
