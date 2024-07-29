@@ -288,7 +288,14 @@ function createHook (meta) {
             includeModules = []
           }
 
-          includeModules.push(...modules)
+          for (const each of modules) {
+            if (!each.startsWith('node:') && builtinModules.includes(each)) {
+              includeModules.push(`node:${each}`)
+            }
+
+            includeModules.push(each)
+          }
+
           data.addHookMessagePort.postMessage('ack')
         }).unref()
       }

@@ -12,6 +12,12 @@ Hook(['path'], (exports) => {
   exports.sep = '@'
 })
 
+Hook(['os'], (exports) => {
+  exports.arch = function () {
+    return 'new_crazy_arch'
+  }
+})
+
 console.assert(path.sep !== '@')
 
 await waitForAllMessagesAcknowledged()
