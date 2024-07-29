@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.11.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.10.0...import-in-the-middle-v1.11.0) (2024-07-29)
+
+
+### Features
+
+* Optionally only wrap modules hooked in `--import` ([#146](https://github.com/nodejs/import-in-the-middle/issues/146)) ([71c8d7b](https://github.com/nodejs/import-in-the-middle/commit/71c8d7bac512df94566d12c96fc2e438b4de2e2a))
+
+
+### Bug Fixes
+
+* `node:` prefixed build-in modules with `include`/`exclude` ([#149](https://github.com/nodejs/import-in-the-middle/issues/149)) ([736a944](https://github.com/nodejs/import-in-the-middle/commit/736a9446e209bc8649801a27cb431df663551dc5))
+
 ## [1.10.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.9.1...import-in-the-middle-v1.10.0) (2024-07-22)
 
 
