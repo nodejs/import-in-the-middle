@@ -3,3 +3,9 @@ package-lock.json
 yarn.lock
 node_modules
 coverage
+.editorconfig
+.eslintrc.yaml
+.release-please-manifest.json
+release-please-config.json
+tsconfig.json
+test
