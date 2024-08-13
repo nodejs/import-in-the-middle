@@ -5,6 +5,7 @@
 const path = require('path')
 const parse = require('module-details-from-path')
 const { fileURLToPath } = require('url')
+const { MessageChannel } = require('worker_threads')
 
 const {
   importHooks,
@@ -31,6 +32,75 @@ function callHookFn (hookFn, namespace, name, baseDir) {
   }
 }
 
+let sendModulesToLoader
+
+/**
+ * EXPERIMENTAL
+ * This feature is experimental and may change in minor versions.
+ * **NOTE** This feature is incompatible with the {internals: true} Hook option.
+ *
+ * Creates a message channel with a port that can be used to add hooks to the
+ * list of exclusively included modules.
+ *
+ * This can be used to only wrap modules that are Hook'ed, however modules need
+ * to be hooked before they are imported.
+ *
+ * ```ts
+ * import { register } from 'module'
+ * import { Hook, createAddHookMessageChannel } from 'import-in-the-middle'
+ *
+ * const { registerOptions, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
+ *
+ * register('import-in-the-middle/hook.mjs', import.meta.url, registerOptions)
+ *
+ * Hook(['fs'], (exported, name, baseDir) => {
+ *   // Instrument the fs module
+ * })
+ *
+ * // Ensure that the loader has acknowledged all the modules
+ * // before we allow execution to continue
+ * await waitForAllMessagesAcknowledged()
+ * ```
+ */
+function createAddHookMessageChannel () {
+  const { port1, port2 } = new MessageChannel()
+  let pendingAckCount = 0
+  let resolveFn
+
+  sendModulesToLoader = (modules) => {
+    pendingAckCount++
+    port1.postMessage(modules)
+  }
+
+  port1.on('message', () => {
+    pendingAckCount--
+
+    if (resolveFn && pendingAckCount <= 0) {
+      resolveFn()
+    }
+  }).unref()
+
+  function waitForAllMessagesAcknowledged () {
+    // This timer is to prevent the process from exiting with code 13:
+    // 13: Unsettled Top-Level Await.
+    const timer = setInterval(() => { }, 1000)
+    const promise = new Promise((resolve) => {
+      resolveFn = resolve
+    }).then(() => { clearInterval(timer) })
+
+    if (pendingAckCount === 0) {
+      resolveFn()
+    }
+
+    return promise
+  }
+
+  const addHookMessagePort = port2
+  const registerOptions = { data: { addHookMessagePort, include: [] }, transferList: [addHookMessagePort] }
+
+  return { registerOptions, addHookMessagePort, waitForAllMessagesAcknowledged }
+}
+
 function Hook (modules, options, hookFn) {
   if ((this instanceof Hook) === false) return new Hook(modules, options, hookFn)
   if (typeof modules === 'function') {
@@ -42,6 +112,10 @@ function Hook (modules, options, hookFn) {
     options = null
   }
   const internals = options ? options.internals === true : false
+
+  if (sendModulesToLoader && Array.isArray(modules)) {
+    sendModulesToLoader(modules)
+  }
 
   this._iitmHook = (name, namespace) => {
     const filename = name
@@ -92,3 +166,4 @@ module.exports = Hook
 module.exports.Hook = Hook
 module.exports.addHook = addHook
 module.exports.removeHook = removeHook
+module.exports.createAddHookMessageChannel = createAddHookMessageChannel

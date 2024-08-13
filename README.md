@@ -34,8 +34,79 @@ console.log(foo) // 1 more than whatever that module exported
 This requires the use of an ESM loader hook, which can be added with the following
 command-line option.
 
+```shell
+node --loader=import-in-the-middle/hook.mjs my-app.mjs
 ```
---loader=import-in-the-middle/hook.mjs
+
+Since `--loader` has been deprecated you can also register the loader hook programmatically via the Node
+[`module.register()`](https://nodejs.org/api/module.html#moduleregisterspecifier-parenturl-options)
+API. However, for this to be able to hook non-dynamic imports, it needs to be
+registered before your app code is evaluated via the `--import` command-line option.
+
+`my-loader.mjs`
+```js
+import * as module from 'module'
+
+module.register('import-in-the-middle/hook.mjs', import.meta.url)
+```
+```shell
+node --import=./my-loader.mjs ./my-code.mjs
+```
+
+When registering the loader hook programmatically, it's possible to pass a list
+of modules, file URLs or regular expressions to either `exclude` or specifically
+`include` which modules are intercepted. This is useful if a module is not
+compatible with the loader hook. 
+
+> **Note:** This feature is incompatible with the `{internals: true}` Hook option
+
+```js
+import * as module from 'module'
+
+// Exclude intercepting a specific module by name
+module.register('import-in-the-middle/hook.mjs', import.meta.url, {
+  data: { exclude: ['package-i-want-to-exclude'] }
+})
+
+// Only intercept a specific module by name
+module.register('import-in-the-middle/hook.mjs', import.meta.url, {
+  data: { include: ['package-i-want-to-include'] }
+})
+```
+
+### Only Intercepting Hooked modules 
+> **Note:** This feature is experimental and is incompatible with the `{internals: true}` Hook option
+
+If you are `Hook`'ing all modules before they are imported, for example in a
+module loaded via the Node.js `--import` CLI argument, you can configure the
+loader to intercept only modules that were specifically hooked.
+
+`instrument.mjs`
+```js
+import { register } from 'module'
+import { Hook, createAddHookMessageChannel } from 'import-in-the-middle'
+
+const { registerOptions, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
+
+register('import-in-the-middle/hook.mjs', import.meta.url, registerOptions)
+
+Hook(['fs'], (exported, name, baseDir) => {
+  // Instrument the fs module
+})
+
+// Ensure that the loader has acknowledged all the modules 
+// before we allow execution to continue
+await waitForAllMessagesAcknowledged()
+```
+`my-app.mjs`
+```js
+import * as fs from 'fs'
+// fs will be instrumented!
+fs.readFileSync('file.txt')
+```
+
+```shell
+node --import=./instrument.mjs ./my-app.mjs
 ```
 
 ## Limitations

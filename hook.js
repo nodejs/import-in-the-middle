@@ -5,6 +5,7 @@
 const { URL } = require('url')
 const { inspect } = require('util')
 const { isIdentifierName } = require('@babel/helper-validator-identifier')
+const { builtinModules } = require('module')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
 
@@ -117,6 +118,63 @@ function isBareSpecifier (specifier) {
   }
 }
 
+/**
+ * Determines whether the input is a bare specifier, file URL or a regular expression.
+ *
+ * - node: prefixed URL strings are considered bare specifiers in this context.
+ */
+function isBareSpecifierFileUrlOrRegex (input) {
+  if (input instanceof RegExp) {
+    return true
+  }
+
+  // Relative and absolute paths
+  if (
+    input.startsWith('.') ||
+    input.startsWith('/')) {
+    return false
+  }
+
+  try {
+    // eslint-disable-next-line no-new
+    const url = new URL(input)
+    // We consider node: URLs bare specifiers in this context
+    return url.protocol === 'file:' || url.protocol === 'node:'
+  } catch (err) {
+    // Anything that fails parsing is a bare specifier
+    return true
+  }
+}
+
+/**
+ * Ensure an array only contains bare specifiers, file URLs or regular expressions.
+ *
+ * - We consider node: prefixed URL string as bare specifiers in this context.
+ * - For node built-in modules, we add additional node: prefixed modules to the
+ *   output array.
+ */
+function ensureArrayWithBareSpecifiersFileUrlsAndRegex (array, type) {
+  if (!Array.isArray(array)) {
+    return undefined
+  }
+
+  const invalid = array.filter(s => !isBareSpecifierFileUrlOrRegex(s))
+
+  if (invalid.length) {
+    throw new Error(`'${type}' option only supports bare specifiers, file URLs or regular expressions. Invalid entries: ${inspect(invalid)}`)
+  }
+
+  // Rather than evaluate whether we have a node: scoped built-in-module for
+  // every call to resolve, we just add them to include/exclude now.
+  for (const each of array) {
+    if (typeof each === 'string' && !each.startsWith('node:') && builtinModules.includes(each)) {
+      array.push(`node:${each}`)
+    }
+  }
+
+  return array
+}
+
 function emitWarning (err) {
   // Unfortunately, process.emitWarning does not output the full error
   // with error.cause like console.warn does so we need to inspect it when
@@ -179,23 +237,23 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
     if (isStarExportLine(n) === true) {
       const [, modFile] = n.split('* from ')
 
-      let modUrl
-      if (isBareSpecifier(modFile)) {
-        // Bare specifiers need to be resolved relative to the parent module.
-        const result = await parentResolve(modFile, { parentURL: srcUrl })
-        modUrl = result.url
-      } else {
-        modUrl = new URL(modFile, srcUrl).href
-      }
+      // Relative paths need to be resolved relative to the parent module
+      const newSpecifier = isBareSpecifier(modFile) ? modFile : new URL(modFile, srcUrl).href
+      // We need to call `parentResolve` to resolve bare specifiers to a full
+      // URL. We also need to call `parentResolve` for all sub-modules to get
+      // the `format`. We can't rely on the parents `format` to know if this
+      // sub-module is ESM or CJS!
+      const result = await parentResolve(newSpecifier, { parentURL: srcUrl })
 
-      const setters = await processModule({
-        srcUrl: modUrl,
-        context,
+      const subSetters = await processModule({
+        srcUrl: result.url,
+        context: { ...context, format: result.format },
         parentGetSource,
         parentResolve,
         excludeDefault: true
       })
-      for (const [name, setter] of setters.entries()) {
+
+      for (const [name, setter] of subSetters.entries()) {
         addSetter(name, setter, true)
       }
     } else {
@@ -222,11 +280,37 @@ function addIitm (url) {
 function createHook (meta) {
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
+  let includeModules, excludeModules
+
+  async function initialize (data) {
+    if (data) {
+      includeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.include, 'include')
+      excludeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.exclude, 'exclude')
+
+      if (data.addHookMessagePort) {
+        data.addHookMessagePort.on('message', (modules) => {
+          if (includeModules === undefined) {
+            includeModules = []
+          }
+
+          for (const each of modules) {
+            if (!each.startsWith('node:') && builtinModules.includes(each)) {
+              includeModules.push(`node:${each}`)
+            }
+
+            includeModules.push(each)
+          }
+
+          data.addHookMessagePort.postMessage('ack')
+        }).unref()
+      }
+    }
+  }
 
   async function resolve (specifier, context, parentResolve) {
     cachedResolve = parentResolve
 
-    // See github.com/nodejs/import-in-the-middle/pull/76.
+    // See https://github.com/nodejs/import-in-the-middle/pull/76.
     if (specifier === iitmURL) {
       return {
         url: specifier,
@@ -239,14 +323,40 @@ function createHook (meta) {
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
     }
-    const url = await parentResolve(newSpecifier, context, parentResolve)
-    if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
-      entrypoint = url.url
-      return { url: url.url, format: 'commonjs' }
+    const result = await parentResolve(newSpecifier, context, parentResolve)
+    if (parentURL === '' && !EXTENSION_RE.test(result.url)) {
+      entrypoint = result.url
+      return { url: result.url, format: 'commonjs' }
+    }
+
+    // For included/excluded modules, we check the specifier to match libraries
+    // that are loaded with bare specifiers from node_modules.
+    //
+    // For non-bare specifier imports, we match to the full file URL because
+    // using relative paths would be very error prone!
+    function match (each) {
+      if (each instanceof RegExp) {
+        return each.test(result.url)
+      }
+
+      return each === specifier || each === result.url
+    }
+
+    if (includeModules && !includeModules.some(match)) {
+      return result
+    }
+
+    if (excludeModules && excludeModules.some(match)) {
+      return result
     }
 
     if (isIitm(parentURL, meta) || hasIitm(parentURL)) {
-      return url
+      return result
+    }
+
+    // We don't want to attempt to wrap native modules
+    if (result.url.endsWith('.node')) {
+      return result
     }
 
     // Node.js v21 renames importAssertions to importAttributes
@@ -254,24 +364,24 @@ function createHook (meta) {
       (context.importAssertions && context.importAssertions.type === 'json') ||
       (context.importAttributes && context.importAttributes.type === 'json')
     ) {
-      return url
+      return result
     }
 
     // If the file is referencing itself, we need to skip adding the iitm search params
-    if (url.url === parentURL) {
+    if (result.url === parentURL) {
       return {
-        url: url.url,
+        url: result.url,
         shortCircuit: true,
-        format: url.format
+        format: result.format
       }
     }
 
-    specifiers.set(url.url, specifier)
+    specifiers.set(result.url, specifier)
 
     return {
-      url: addIitm(url.url),
+      url: addIitm(result.url),
       shortCircuit: true,
-      format: url.format
+      format: result.format
     }
   }
 
@@ -331,9 +441,10 @@ register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(rea
   }
 
   if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
-    return { load, resolve }
+    return { initialize, load, resolve }
   } else {
     return {
+      initialize,
       load,
       resolve,
       getSource: load,
