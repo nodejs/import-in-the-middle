@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.0...import-in-the-middle-v1.11.1) (2024-09-26)
+
+
+### Bug Fixes
+
+* Support Hooking multiple times ([#153](https://github.com/nodejs/import-in-the-middle/issues/153)) ([e0d8080](https://github.com/nodejs/import-in-the-middle/commit/e0d808041eff228f4b4519454f7eea8f0930238a))
+
 ## [1.11.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.10.0...import-in-the-middle-v1.11.0) (2024-07-29)
 
 
