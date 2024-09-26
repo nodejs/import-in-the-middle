@@ -259,6 +259,7 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
         $${n} = v
         return true
       }
+      get.${n} = () => $${n}
       `)
     }
   }
@@ -402,10 +403,11 @@ const _ = Object.assign(
   namespace
 )
 const set = {}
+const get = {}
 
 ${Array.from(setters.values()).join('\n')}
 
-register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(realUrl))})
+register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(specifiers.get(realUrl))})
 `
         }
       } catch (cause) {
