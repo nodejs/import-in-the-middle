@@ -20,9 +20,9 @@ Hook([toWrap], (exports) => {
 })
 
 Hook([toWrap], (exports) => {
-  const original = exports.default
+  const shouldNotExist = exports.default
   exports = function () {
-    return original() + '-wrapped'
+    return shouldNotExist()
   }
 })
 
