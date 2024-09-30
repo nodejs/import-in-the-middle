@@ -19,6 +19,15 @@ Hook([toWrap], (exports) => {
   }
 })
 
-const { foo } = await import('../fixtures/foo.mjs')
+Hook([toWrap], (exports) => {
+  const shouldNotExist = exports.default
+  exports = function () {
+    return shouldNotExist()
+  }
+})
 
-strictEqual(foo(), 'foo-first-second')
+const imp = await import('../fixtures/foo.mjs')
+
+strictEqual(imp.foo(), 'foo-first-second')
+// This should not throw!
+strictEqual(imp.default, undefined)
