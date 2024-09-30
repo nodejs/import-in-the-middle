@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.1...import-in-the-middle-v1.11.2) (2024-09-30)
+
+
+### Bug Fixes
+
+* do nothing if target does not exist in getters map ([#155](https://github.com/nodejs/import-in-the-middle/issues/155)) ([5f6be49](https://github.com/nodejs/import-in-the-middle/commit/5f6be494fc11caf8dcf900807c5b6b646fcd8d74))
+
 ## [1.11.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.0...import-in-the-middle-v1.11.1) (2024-09-26)
 
 
