@@ -87,7 +87,7 @@ export declare function removeHook(hookFn: HookFunction): void
 
 type CreateAddHookMessageChannelReturn<Data> = {
   addHookMessagePort: MessagePort,
-  waitForAllMessagesAcknowledged: Promise<void>
+  waitForAllMessagesAcknowledged: () => Promise<void>
   registerOptions: { data?: Data; transferList?: any[]; }
 }
 
