@@ -280,7 +280,7 @@ function createHook (meta) {
 
   async function initialize (data) {
     if (global.__import_in_the_middle_initialized__) {
-      console.warn("The 'import-in-the-middle' hook has already been initialized")
+      process.emitWarning("The 'import-in-the-middle' hook has already been initialized")
     }
 
     global.__import_in_the_middle_initialized__ = true
