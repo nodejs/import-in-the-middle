@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.3](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.2...import-in-the-middle-v1.11.3) (2024-12-04)
+
+
+### Bug Fixes
+
+* Correct type definition for waitForAllMessagesAcknowledged ([#160](https://github.com/nodejs/import-in-the-middle/issues/160)) ([353d535](https://github.com/nodejs/import-in-the-middle/commit/353d535d1ce7ba485e137bcf3db08bbddd6b31d6))
+
 ## [1.11.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.1...import-in-the-middle-v1.11.2) (2024-09-30)
 
 
