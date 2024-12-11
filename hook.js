@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-const { URL } = require('url')
+const { URL, fileURLToPath } = require('url')
 const { inspect } = require('util')
 const { builtinModules } = require('module')
 const specifiers = new Map()
@@ -341,7 +341,7 @@ function createHook (meta) {
         return each.test(result.url)
       }
 
-      return each === specifier || each === result.url
+      return each === specifier || each === result.url || (result.url.startsWith('file:') && each === fileURLToPath(result.url))
     }
 
     if (includeModules && !includeModules.some(match)) {
