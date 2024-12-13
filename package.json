@@ -1,6 +1,6 @@
 {
   "name": "import-in-the-middle",
-  "version": "1.11.3",
+  "version": "1.12.0",
   "description": "Intercept imports in Node.js",
   "main": "index.js",
   "scripts": {

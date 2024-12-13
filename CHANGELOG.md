@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.3...import-in-the-middle-v1.12.0) (2024-12-13)
+
+
+### Features
+
+* Support absolute paths for `include` ([#168](https://github.com/nodejs/import-in-the-middle/issues/168)) ([d0d9bc3](https://github.com/nodejs/import-in-the-middle/commit/d0d9bc3d1e0bcef1094af58c15cf997507777067))
+* Warn on multiple hook initialization ([#165](https://github.com/nodejs/import-in-the-middle/issues/165)) ([9bd539e](https://github.com/nodejs/import-in-the-middle/commit/9bd539ea6ff1684c8807bc30c8b68882cc9e057f))
+
 ## [1.11.3](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.2...import-in-the-middle-v1.11.3) (2024-12-04)
 
 
