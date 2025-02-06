@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.12.0...import-in-the-middle-v1.13.0) (2025-02-06)
+
+
+### Features
+
+* Support import attributes  ([#176](https://github.com/nodejs/import-in-the-middle/issues/176)) ([916af26](https://github.com/nodejs/import-in-the-middle/commit/916af2627e0e8cb6d50a3b54c1a280dc16e20925))
+
 ## [1.12.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.3...import-in-the-middle-v1.12.0) (2024-12-13)
 
 
