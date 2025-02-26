@@ -253,7 +253,12 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
       }
     } else {
       addSetter(n, `
-      let $${n} = _.${n}
+      let $${n}
+      try {
+        $${n} = _.${n} = namespace.${n}
+      } catch (err) {
+        if (!(err instanceof ReferenceError)) throw err
+      }
       export { $${n} as ${n} }
       set.${n} = (v) => {
         $${n} = v
@@ -404,10 +409,7 @@ import { register } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(realUrl)}
 
 // Mimic a Module object (https://tc39.es/ecma262/#sec-module-namespace-objects).
-const _ = Object.assign(
-  Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } }),
-  namespace
-)
+const _ = Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } })
 const set = {}
 const get = {}
 
