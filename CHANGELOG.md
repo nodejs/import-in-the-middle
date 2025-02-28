@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.13.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.13.0...import-in-the-middle-v1.13.1) (2025-02-28)
+
+
+### Bug Fixes
+
+* handling of circular dependencies ([#181](https://github.com/nodejs/import-in-the-middle/issues/181)) ([b58092e](https://github.com/nodejs/import-in-the-middle/commit/b58092ec9becf4a14f541da4cf5bfb190f2a9a9b))
+* importing JSON files ([#182](https://github.com/nodejs/import-in-the-middle/issues/182)) ([8c52014](https://github.com/nodejs/import-in-the-middle/commit/8c52014658fcf698cc340d032b441d9e7a65be36))
+* warning from use of context.importAssertions ([#179](https://github.com/nodejs/import-in-the-middle/issues/179)) ([8e56cf1](https://github.com/nodejs/import-in-the-middle/commit/8e56cf1e89752e6c8768d648c10c12fb3178e2ae))
+
 ## [1.13.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.12.0...import-in-the-middle-v1.13.0) (2025-02-06)
 
 
