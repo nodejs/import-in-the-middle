@@ -198,12 +198,13 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
   const exportNames = await getExports(srcUrl, context, parentGetSource)
   const starExports = new Set()
   const setters = new Map()
+  const starExportSources = new Map()
 
-  const addSetter = (name, setter, isStarExport = false) => {
+  const addSetter = (name, source, setter, isStarExport = false) => {
     if (setters.has(name)) {
       if (isStarExport) {
-        // If there's already a matching star export, delete it
-        if (starExports.has(name)) {
+        // If there's already a matching star export and it comes from a different source, delete it
+        if (starExports.has(name) && !starExportSources.get(name).has(source)) {
           setters.delete(name)
         }
         // and return so this is excluded
@@ -220,6 +221,9 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
       // named exports
       if (isStarExport) {
         starExports.add(name)
+        const sources = starExportSources.get(name) || new Set()
+        sources.add(source)
+        starExportSources.set(name, sources)
       }
 
       setters.set(name, setter)
@@ -249,10 +253,10 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
       })
 
       for (const [name, setter] of subSetters.entries()) {
-        addSetter(name, setter, true)
+        addSetter(name, srcUrl, setter, true)
       }
     } else {
-      addSetter(n, `
+      addSetter(n, srcUrl, `
       let $${n}
       try {
         $${n} = _.${n} = namespace.${n}
