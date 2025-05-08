@@ -1,5 +1,50 @@
 # Changelog
 
+## [1.13.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.13.0...import-in-the-middle-v1.13.1) (2025-02-28)
+
+
+### Bug Fixes
+
+* handling of circular dependencies ([#181](https://github.com/nodejs/import-in-the-middle/issues/181)) ([b58092e](https://github.com/nodejs/import-in-the-middle/commit/b58092ec9becf4a14f541da4cf5bfb190f2a9a9b))
+* importing JSON files ([#182](https://github.com/nodejs/import-in-the-middle/issues/182)) ([8c52014](https://github.com/nodejs/import-in-the-middle/commit/8c52014658fcf698cc340d032b441d9e7a65be36))
+* warning from use of context.importAssertions ([#179](https://github.com/nodejs/import-in-the-middle/issues/179)) ([8e56cf1](https://github.com/nodejs/import-in-the-middle/commit/8e56cf1e89752e6c8768d648c10c12fb3178e2ae))
+
+## [1.13.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.12.0...import-in-the-middle-v1.13.0) (2025-02-06)
+
+
+### Features
+
+* Support import attributes  ([#176](https://github.com/nodejs/import-in-the-middle/issues/176)) ([916af26](https://github.com/nodejs/import-in-the-middle/commit/916af2627e0e8cb6d50a3b54c1a280dc16e20925))
+
+## [1.12.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.3...import-in-the-middle-v1.12.0) (2024-12-13)
+
+
+### Features
+
+* Support absolute paths for `include` ([#168](https://github.com/nodejs/import-in-the-middle/issues/168)) ([d0d9bc3](https://github.com/nodejs/import-in-the-middle/commit/d0d9bc3d1e0bcef1094af58c15cf997507777067))
+* Warn on multiple hook initialization ([#165](https://github.com/nodejs/import-in-the-middle/issues/165)) ([9bd539e](https://github.com/nodejs/import-in-the-middle/commit/9bd539ea6ff1684c8807bc30c8b68882cc9e057f))
+
+## [1.11.3](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.2...import-in-the-middle-v1.11.3) (2024-12-04)
+
+
+### Bug Fixes
+
+* Correct type definition for waitForAllMessagesAcknowledged ([#160](https://github.com/nodejs/import-in-the-middle/issues/160)) ([353d535](https://github.com/nodejs/import-in-the-middle/commit/353d535d1ce7ba485e137bcf3db08bbddd6b31d6))
+
+## [1.11.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.1...import-in-the-middle-v1.11.2) (2024-09-30)
+
+
+### Bug Fixes
+
+* do nothing if target does not exist in getters map ([#155](https://github.com/nodejs/import-in-the-middle/issues/155)) ([5f6be49](https://github.com/nodejs/import-in-the-middle/commit/5f6be494fc11caf8dcf900807c5b6b646fcd8d74))
+
+## [1.11.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.11.0...import-in-the-middle-v1.11.1) (2024-09-26)
+
+
+### Bug Fixes
+
+* Support Hooking multiple times ([#153](https://github.com/nodejs/import-in-the-middle/issues/153)) ([e0d8080](https://github.com/nodejs/import-in-the-middle/commit/e0d808041eff228f4b4519454f7eea8f0930238a))
+
 ## [1.11.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.10.0...import-in-the-middle-v1.11.0) (2024-07-29)
 
 

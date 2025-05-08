@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-const { URL } = require('url')
+const { URL, fileURLToPath } = require('url')
 const { inspect } = require('util')
 const { isIdentifierName } = require('@babel/helper-validator-identifier')
 const { builtinModules } = require('module')
@@ -258,12 +258,18 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
       }
     } else {
       addSetter(n, `
-      let $${n} = _.${n}
+      let $${n}
+      try {
+        $${n} = _.${n} = namespace.${n}
+      } catch (err) {
+        if (!(err instanceof ReferenceError)) throw err
+      }
       export { $${n} as ${n} }
       set.${n} = (v) => {
         $${n} = v
         return true
       }
+      get.${n} = () => $${n}
       `)
     }
   }
@@ -283,6 +289,12 @@ function createHook (meta) {
   let includeModules, excludeModules
 
   async function initialize (data) {
+    if (global.__import_in_the_middle_initialized__) {
+      process.emitWarning("The 'import-in-the-middle' hook has already been initialized")
+    }
+
+    global.__import_in_the_middle_initialized__ = true
+
     if (data) {
       includeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.include, 'include')
       excludeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.exclude, 'exclude')
@@ -339,7 +351,7 @@ function createHook (meta) {
         return each.test(result.url)
       }
 
-      return each === specifier || each === result.url
+      return each === specifier || each === result.url || (result.url.startsWith('file:') && each === fileURLToPath(result.url))
     }
 
     if (includeModules && !includeModules.some(match)) {
@@ -360,10 +372,8 @@ function createHook (meta) {
     }
 
     // Node.js v21 renames importAssertions to importAttributes
-    if (
-      (context.importAssertions && context.importAssertions.type === 'json') ||
-      (context.importAttributes && context.importAttributes.type === 'json')
-    ) {
+    const importAttributes = context.importAttributes || context.importAssertions
+    if (importAttributes && importAttributes.type === 'json') {
       return result
     }
 
@@ -405,15 +415,13 @@ import { register } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(realUrl)}
 
 // Mimic a Module object (https://tc39.es/ecma262/#sec-module-namespace-objects).
-const _ = Object.assign(
-  Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } }),
-  namespace
-)
+const _ = Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } })
 const set = {}
+const get = {}
 
 ${Array.from(setters.values()).join('\n')}
 
-register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(realUrl))})
+register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(specifiers.get(realUrl))})
 `
         }
       } catch (cause) {

@@ -2,16 +2,14 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
+import Hook from '../../index.js'
 import jsonMjs from '../fixtures/json-attributes.mjs'
 import { strictEqual } from 'assert'
 
-// Acorn does not support import attributes so an error is logged but the import
-// still works!
-//
-// Hook((exports, name) => {
-//   if (name.match(/json\.mjs/)) {
-//     exports.default.data += '-dawg'
-//   }
-// })
+Hook((exports, name) => {
+  if (name.match(/json-attributes\.mjs/)) {
+    exports.default.data += '-dawg'
+  }
+})
 
-strictEqual(jsonMjs.data, 'dog')
+strictEqual(jsonMjs.data, 'dog-dawg')
