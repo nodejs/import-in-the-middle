@@ -11,6 +11,7 @@ const isWin = process.platform === 'win32'
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
 const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
+const EXTENSION_TYPESCRIPT = /\.(ts|mts|cts)$/
 const NODE_VERSION = process.versions.node.split('.')
 const NODE_MAJOR = Number(NODE_VERSION[0])
 const NODE_MINOR = Number(NODE_VERSION[1])
@@ -347,6 +348,10 @@ function createHook (meta) {
       }
 
       return each === specifier || each === result.url || (result.url.startsWith('file:') && each === fileURLToPath(result.url))
+    }
+
+    if (EXTENSION_TYPESCRIPT.test(result.url)) {
+      return result
     }
 
     if (includeModules && !includeModules.some(match)) {
