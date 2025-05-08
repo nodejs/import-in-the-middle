@@ -350,7 +350,7 @@ function createHook (meta) {
       return each === specifier || each === result.url || (result.url.startsWith('file:') && each === fileURLToPath(result.url))
     }
 
-    if (EXTENSION_TYPESCRIPT.test(result.url)) {
+    if (result.format === 'module-typescript' && EXTENSION_TYPESCRIPT.test(result.url)) {
       return result
     }
 
