@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.13.1...import-in-the-middle-v1.13.2) (2025-05-12)
+
+
+### Bug Fixes
+
+* Don't attempt to wrap TypeScript modules ([#191](https://github.com/nodejs/import-in-the-middle/issues/191)) ([6deb87e](https://github.com/nodejs/import-in-the-middle/commit/6deb87ea069ec2ee749ce2297ea47ce071d18cf9))
+
 ## [1.13.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.13.0...import-in-the-middle-v1.13.1) (2025-02-28)
 
 
