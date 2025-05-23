@@ -109,6 +109,23 @@ fs.readFileSync('file.txt')
 node --import=./instrument.mjs ./my-app.mjs
 ```
 
+### Experimental `experimentalPatchInternals` option
+
+It was found that `import-in-the-middle` didn't match the hooking behavior of `require-in-the-middle` in some cases: 
+https://github.com/nodejs/import-in-the-middle/issues/185
+
+The `experimentalPatchInternals` option forces the loader to match the behavior of `require-in-the-middle` in these cases.
+
+This option is experimental and may be removed or made the default in the future.
+
+```js
+import { register } from 'module'
+
+register('import-in-the-middle/hook.mjs', import.meta.url, {
+  data: { experimentalPatchInternals: true }
+})
+```
+
 ## Limitations
 
 * You cannot add new exports to a module. You can only modify existing ones.
