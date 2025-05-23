@@ -10,7 +10,8 @@ const { MessageChannel } = require('worker_threads')
 const {
   importHooks,
   specifiers,
-  toHook
+  toHook,
+  getExperimentalPatchInternals
 } = require('./lib/register')
 
 function addHook (hook) {
@@ -144,7 +145,7 @@ function Hook (modules, options, hookFn) {
             if (internals) {
               name = name + path.sep + path.relative(baseDir, fileURLToPath(filename))
             } else {
-              if (!baseDir.endsWith(specifiers.get(filename))) continue
+              if (!getExperimentalPatchInternals() && !baseDir.endsWith(specifiers.get(filename))) continue
             }
           }
           callHookFn(hookFn, namespace, name, baseDir)
