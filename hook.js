@@ -256,6 +256,7 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
     } else {
       const variableName = `$${n.replace(/[^a-zA-Z0-9_]/g, '_')}`
       const objectKey = JSON.stringify(n)
+      const reExportedName = n === 'default' ? n : objectKey
 
       addSetter(n, `
       let ${variableName}
@@ -264,7 +265,7 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
       } catch (err) {
         if (!(err instanceof ReferenceError)) throw err
       }
-      export { ${variableName} as ${objectKey} }
+      export { ${variableName} as ${reExportedName} }
       set[${objectKey}] = (v) => {
         ${variableName} = v
         return true
