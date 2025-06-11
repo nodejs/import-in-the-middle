@@ -256,7 +256,7 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
     } else {
       const variableName = `$${n.replace(/[^a-zA-Z0-9_]/g, '_')}`
       const objectKey = JSON.stringify(n)
-      const reExportedName = n === 'default' ? n : objectKey
+      const reExportedName = n === 'default' && NODE_MAJOR < 16 ? n : objectKey
 
       addSetter(n, `
       let ${variableName}
