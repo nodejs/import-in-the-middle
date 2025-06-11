@@ -254,19 +254,22 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
         addSetter(name, setter, true)
       }
     } else {
+      const variableName = `$${n.replace(/[^a-zA-Z0-9_]/g, '_')}`
+      const objectKey = JSON.stringify(n)
+
       addSetter(n, `
-      let $${n}
+      let ${variableName}
       try {
-        $${n} = _.${n} = namespace.${n}
+        ${variableName} = _[${objectKey}] = namespace[${objectKey}]
       } catch (err) {
         if (!(err instanceof ReferenceError)) throw err
       }
-      export { $${n} as ${n} }
-      set.${n} = (v) => {
-        $${n} = v
+      export { ${variableName} as ${objectKey} }
+      set[${objectKey}] = (v) => {
+        ${variableName} = v
         return true
       }
-      get.${n} = () => $${n}
+      get[${objectKey}] = () => ${variableName}
       `)
     }
   }
