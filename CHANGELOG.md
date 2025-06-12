@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.14.0...import-in-the-middle-v1.14.1) (2025-06-12)
+
+
+### Bug Fixes
+
+* Account for invalid identifiers ([#198](https://github.com/nodejs/import-in-the-middle/issues/198)) ([2cc8207](https://github.com/nodejs/import-in-the-middle/commit/2cc82070a5ca947463b70f28647b03496a9526f0))
+
 ## [1.14.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.13.2...import-in-the-middle-v1.14.0) (2025-05-24)
 
 
