@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.14.1...import-in-the-middle-v1.14.2) (2025-06-13)
+
+
+### Bug Fixes
+
+* do not replace dollar sign in shim variable name ([#200](https://github.com/nodejs/import-in-the-middle/issues/200)) ([20bf0e5](https://github.com/nodejs/import-in-the-middle/commit/20bf0e5c5f6f44f42a8618ad45d08622a63d4d45))
+
 ## [1.14.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.14.0...import-in-the-middle-v1.14.1) (2025-06-12)
 
 
