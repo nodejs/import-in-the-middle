@@ -8,6 +8,7 @@ const { builtinModules } = require('module')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
 let experimentalPatchInternals = false
+const { readFileSync } = require('fs')
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
@@ -466,7 +467,17 @@ register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(specifiers.ge
       }
     }
 
-    return parentLoad(url, context, parentLoad)
+    const parentResult = await parentLoad(url, context, parentLoad)
+
+    // Prevent returning a nullish value for the source if a CJS module is loaded.
+    // The reason for this is that Node.js will otherwise crash if the synchronous
+    // module customization hooks are used: https://github.com/nodejs/node/issues/57327
+    // The Node.js documentation also mentions that returning nullish values will no longer be supported in future.
+    if (parentResult.format === 'commonjs' && (parentResult.source === null || parentResult.source === undefined)) {
+      parentResult.source = readFileSync(fileURLToPath(url), 'utf8')
+    }
+
+    return parentResult
   }
 
   if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
