@@ -473,7 +473,7 @@ register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(specifiers.ge
     // The reason for this is that Node.js will otherwise crash if the synchronous
     // module customization hooks are used: https://github.com/nodejs/node/issues/57327
     // The Node.js documentation also mentions that returning nullish values will no longer be supported in future.
-    if (parentResult.format === 'commonjs' && (parentResult.source === null || parentResult.source === undefined)) {
+    if (parentResult.format === 'commonjs' && !parentResult.source) {
       parentResult.source = readFileSync(fileURLToPath(url), 'utf8')
     }
 
