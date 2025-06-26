@@ -5,10 +5,10 @@
 const { URL, fileURLToPath } = require('url')
 const { inspect } = require('util')
 const { builtinModules } = require('module')
+const { readFileSync } = require('fs')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
 let experimentalPatchInternals = false
-const { readFileSync } = require('fs')
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
