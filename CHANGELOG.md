@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.3](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.14.2...import-in-the-middle-v1.14.3) (2025-09-24)
+
+
+### Bug Fixes
+
+* use `createRequire` to load `hook.js` ([#205](https://github.com/nodejs/import-in-the-middle/issues/205)) ([81a2ae0](https://github.com/nodejs/import-in-the-middle/commit/81a2ae0ea094df27c9baaf6e267276e0acb21af1))
+
 ## [1.14.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.14.1...import-in-the-middle-v1.14.2) (2025-06-13)
 
 
