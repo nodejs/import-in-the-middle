@@ -1,11 +1,14 @@
 'use strict'
 
-const getEsmExports = require('../../lib/get-esm-exports.js')
-const fs = require('fs')
-const assert = require('assert')
-const path = require('path')
+import getEsmExports from '../../lib/get-esm-exports.mjs'
+import fs from 'fs'
+import assert from 'assert'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
-const fixturePath = path.join(__dirname, '../fixtures/esm-exports.txt')
+const dirname = path.dirname(fileURLToPath(import.meta.url))
+
+const fixturePath = path.join(dirname, '../fixtures/esm-exports.txt')
 const fixture = fs.readFileSync(fixturePath, 'utf8')
 
 fixture.split('\n').forEach(line => {

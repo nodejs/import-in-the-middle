@@ -2,7 +2,7 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-import { createHook } from './hook.js'
+import { createHook } from './create-hook.mjs'
 
 const { initialize, load, resolve, getFormat, getSource } = createHook(import.meta)
 
