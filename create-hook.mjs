@@ -5,6 +5,7 @@
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules } from 'module'
+import { getExports } from './lib/get-exports.mjs'
 
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
@@ -19,14 +20,6 @@ const NODE_MINOR = Number(NODE_VERSION[1])
 const HANDLED_FORMATS = new Set(['builtin', 'module', 'commonjs'])
 
 let entrypoint
-
-let getExports
-if (NODE_MAJOR >= 20 || (NODE_MAJOR === 18 && NODE_MINOR >= 19)) {
-  // We'll load this lazily in `processModule` since Node.js 12 doesn't support top-level await.
-  getExports = null
-} else {
-  getExports = (url) => import(url).then(Object.keys)
-}
 
 function hasIitm (url) {
   try {
@@ -199,9 +192,6 @@ function emitWarning (err) {
  * from the module and any transitive export all modules.
  */
 async function processModule ({ srcUrl, context, parentGetSource, parentResolve, excludeDefault }) {
-  if (!getExports) {
-    getExports = (await import('./lib/get-exports.mjs')).default
-  }
   const exportNames = await getExports(srcUrl, context, parentGetSource)
   const starExports = new Set()
   const setters = new Map()
