@@ -5,7 +5,7 @@
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules } from 'module'
-import { getExports } from './lib/get-exports.mjs'
+import { getExports as getExportsImpl } from './lib/get-exports.mjs'
 
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
@@ -18,6 +18,13 @@ const NODE_VERSION = process.versions.node.split('.')
 const NODE_MAJOR = Number(NODE_VERSION[0])
 const NODE_MINOR = Number(NODE_VERSION[1])
 const HANDLED_FORMATS = new Set(['builtin', 'module', 'commonjs'])
+
+let getExports
+if (NODE_MAJOR >= 20 || (NODE_MAJOR === 18 && NODE_MINOR >= 19)) {
+  getExports = getExportsImpl
+} else {
+  getExports = (url) => import(url).then(Object.keys)
+}
 
 let entrypoint
 
@@ -427,7 +434,6 @@ register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(specifiers.ge
 `
         }
       } catch (cause) {
-        process._rawDebug(cause)
         // If there are other ESM loader hooks registered as well as iitm,
         // depending on the order they are registered, source might not be
         // JavaScript.
