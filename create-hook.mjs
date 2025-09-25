@@ -22,7 +22,8 @@ let entrypoint
 
 let getExports
 if (NODE_MAJOR >= 20 || (NODE_MAJOR === 18 && NODE_MINOR >= 19)) {
-  getExports = (await import('./lib/get-exports.mjs')).default
+  // We'll load this lazily in `processModule` since Node.js 12 doesn't support top-level await.
+  getExports = null
 } else {
   getExports = (url) => import(url).then(Object.keys)
 }
@@ -198,6 +199,9 @@ function emitWarning (err) {
  * from the module and any transitive export all modules.
  */
 async function processModule ({ srcUrl, context, parentGetSource, parentResolve, excludeDefault }) {
+  if (!getExports) {
+    getExports = (await import('./lib/get-exports.mjs')).default
+  }
   const exportNames = await getExports(srcUrl, context, parentGetSource)
   const starExports = new Set()
   const setters = new Map()
