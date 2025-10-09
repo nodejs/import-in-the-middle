@@ -2,10 +2,12 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
-const { URL } = require('url')
+const { URL, fileURLToPath } = require('url')
 const { inspect } = require('util')
+const { builtinModules } = require('module')
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
+let experimentalPatchInternals = false
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
@@ -13,6 +15,7 @@ const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
 const NODE_VERSION = process.versions.node.split('.')
 const NODE_MAJOR = Number(NODE_VERSION[0])
 const NODE_MINOR = Number(NODE_VERSION[1])
+const HANDLED_FORMATS = new Set(['builtin', 'module', 'commonjs'])
 
 let entrypoint
 
@@ -116,7 +119,16 @@ function isBareSpecifier (specifier) {
   }
 }
 
-function isBareSpecifierOrFileUrl (input) {
+/**
+ * Determines whether the input is a bare specifier, file URL or a regular expression.
+ *
+ * - node: prefixed URL strings are considered bare specifiers in this context.
+ */
+function isBareSpecifierFileUrlOrRegex (input) {
+  if (input instanceof RegExp) {
+    return true
+  }
+
   // Relative and absolute paths
   if (
     input.startsWith('.') ||
@@ -127,22 +139,38 @@ function isBareSpecifierOrFileUrl (input) {
   try {
     // eslint-disable-next-line no-new
     const url = new URL(input)
-    return url.protocol === 'file:'
+    // We consider node: URLs bare specifiers in this context
+    return url.protocol === 'file:' || url.protocol === 'node:'
   } catch (err) {
     // Anything that fails parsing is a bare specifier
     return true
   }
 }
 
-function ensureArrayWithBareSpecifiersAndFileUrls (array, type) {
+/**
+ * Ensure an array only contains bare specifiers, file URLs or regular expressions.
+ *
+ * - We consider node: prefixed URL string as bare specifiers in this context.
+ * - For node built-in modules, we add additional node: prefixed modules to the
+ *   output array.
+ */
+function ensureArrayWithBareSpecifiersFileUrlsAndRegex (array, type) {
   if (!Array.isArray(array)) {
     return undefined
   }
 
-  const invalid = array.filter(s => !isBareSpecifierOrFileUrl(s))
+  const invalid = array.filter(s => !isBareSpecifierFileUrlOrRegex(s))
 
   if (invalid.length) {
-    throw new Error(`'${type}' option only supports bare specifiers and file URLs. Invalid entries: ${inspect(invalid)}`)
+    throw new Error(`'${type}' option only supports bare specifiers, file URLs or regular expressions. Invalid entries: ${inspect(invalid)}`)
+  }
+
+  // Rather than evaluate whether we have a node: scoped built-in-module for
+  // every call to resolve, we just add them to include/exclude now.
+  for (const each of array) {
+    if (typeof each === 'string' && !each.startsWith('node:') && builtinModules.includes(each)) {
+      array.push(`node:${each}`)
+    }
   }
 
   return array
@@ -206,33 +234,43 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
     if (isStarExportLine(n) === true) {
       const [, modFile] = n.split('* from ')
 
-      let modUrl
-      if (isBareSpecifier(modFile)) {
-        // Bare specifiers need to be resolved relative to the parent module.
-        const result = await parentResolve(modFile, { parentURL: srcUrl })
-        modUrl = result.url
-      } else {
-        modUrl = new URL(modFile, srcUrl).href
-      }
+      // Relative paths need to be resolved relative to the parent module
+      const newSpecifier = isBareSpecifier(modFile) ? modFile : new URL(modFile, srcUrl).href
+      // We need to call `parentResolve` to resolve bare specifiers to a full
+      // URL. We also need to call `parentResolve` for all sub-modules to get
+      // the `format`. We can't rely on the parents `format` to know if this
+      // sub-module is ESM or CJS!
+      const result = await parentResolve(newSpecifier, { parentURL: srcUrl })
 
-      const setters = await processModule({
-        srcUrl: modUrl,
-        context,
+      const subSetters = await processModule({
+        srcUrl: result.url,
+        context: { ...context, format: result.format },
         parentGetSource,
         parentResolve,
         excludeDefault: true
       })
-      for (const [name, setter] of setters.entries()) {
+
+      for (const [name, setter] of subSetters.entries()) {
         addSetter(name, setter, true)
       }
     } else {
+      const variableName = `$${n.replace(/[^a-zA-Z0-9_$]/g, '_')}`
+      const objectKey = JSON.stringify(n)
+      const reExportedName = n === 'default' || NODE_MAJOR < 16 ? n : objectKey
+
       addSetter(n, `
-      let $${n} = _.${n}
-      export { $${n} as ${n} }
-      set.${n} = (v) => {
-        $${n} = v
+      let ${variableName}
+      try {
+        ${variableName} = _[${objectKey}] = namespace[${objectKey}]
+      } catch (err) {
+        if (!(err instanceof ReferenceError)) throw err
+      }
+      export { ${variableName} as ${reExportedName} }
+      set[${objectKey}] = (v) => {
+        ${variableName} = v
         return true
       }
+      get[${objectKey}] = () => ${variableName}
       `)
     }
   }
@@ -252,16 +290,44 @@ function createHook (meta) {
   let includeModules, excludeModules
 
   async function initialize (data) {
+    if (global.__import_in_the_middle_initialized__) {
+      process.emitWarning("The 'import-in-the-middle' hook has already been initialized")
+    }
+
+    global.__import_in_the_middle_initialized__ = true
+
     if (data) {
-      includeModules = ensureArrayWithBareSpecifiersAndFileUrls(data.include, 'include')
-      excludeModules = ensureArrayWithBareSpecifiersAndFileUrls(data.exclude, 'exclude')
+      if (data.experimentalPatchInternals) {
+        experimentalPatchInternals = true
+      }
+
+      includeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.include, 'include')
+      excludeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.exclude, 'exclude')
+
+      if (data.addHookMessagePort) {
+        data.addHookMessagePort.on('message', (modules) => {
+          if (includeModules === undefined) {
+            includeModules = []
+          }
+
+          for (const each of modules) {
+            if (!each.startsWith('node:') && builtinModules.includes(each)) {
+              includeModules.push(`node:${each}`)
+            }
+
+            includeModules.push(each)
+          }
+
+          data.addHookMessagePort.postMessage('ack')
+        }).unref()
+      }
     }
   }
 
   async function resolve (specifier, context, parentResolve) {
     cachedResolve = parentResolve
 
-    // See github.com/nodejs/import-in-the-middle/pull/76.
+    // See https://github.com/nodejs/import-in-the-middle/pull/76.
     if (specifier === iitmURL) {
       return {
         url: specifier,
@@ -283,13 +349,25 @@ function createHook (meta) {
     // For included/excluded modules, we check the specifier to match libraries
     // that are loaded with bare specifiers from node_modules.
     //
-    // For non-bare specifier imports, we only support matching file URL strings
-    // because using relative paths would be very error prone!
-    if (includeModules && !includeModules.some(lib => lib === specifier || lib === result.url.url)) {
+    // For non-bare specifier imports, we match to the full file URL because
+    // using relative paths would be very error prone!
+    function match (each) {
+      if (each instanceof RegExp) {
+        return each.test(result.url)
+      }
+
+      return each === specifier || each === result.url || (result.url.startsWith('file:') && each === fileURLToPath(result.url))
+    }
+
+    if (result.format && !HANDLED_FORMATS.has(result.format)) {
       return result
     }
 
-    if (excludeModules && excludeModules.some(lib => lib === specifier || lib === result.url.url)) {
+    if (includeModules && !includeModules.some(match)) {
+      return result
+    }
+
+    if (excludeModules && excludeModules.some(match)) {
       return result
     }
 
@@ -297,11 +375,14 @@ function createHook (meta) {
       return result
     }
 
+    // We don't want to attempt to wrap native modules
+    if (result.url.endsWith('.node')) {
+      return result
+    }
+
     // Node.js v21 renames importAssertions to importAttributes
-    if (
-      (context.importAssertions && context.importAssertions.type === 'json') ||
-      (context.importAttributes && context.importAttributes.type === 'json')
-    ) {
+    const importAttributes = context.importAttributes || context.importAssertions
+    if (importAttributes && importAttributes.type === 'json') {
       return result
     }
 
@@ -338,17 +419,16 @@ function createHook (meta) {
           source: `
 import { register } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(realUrl)}
+${experimentalPatchInternals ? `import { setExperimentalPatchInternals } from '${iitmURL}'\nsetExperimentalPatchInternals(true)` : ''}
 
 // Mimic a Module object (https://tc39.es/ecma262/#sec-module-namespace-objects).
-const _ = Object.assign(
-  Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } }),
-  namespace
-)
+const _ = Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } })
 const set = {}
+const get = {}
 
 ${Array.from(setters.values()).join('\n')}
 
-register(${JSON.stringify(realUrl)}, _, set, ${JSON.stringify(specifiers.get(realUrl))})
+register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(specifiers.get(realUrl))})
 `
         }
       } catch (cause) {
