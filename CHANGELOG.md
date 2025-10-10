@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.14.4...import-in-the-middle-v1.15.0) (2025-10-09)
+
+
+### Features
+
+* Compatibility with specifier imports  ([#211](https://github.com/nodejs/import-in-the-middle/issues/211)) ([83d662a](https://github.com/nodejs/import-in-the-middle/commit/83d662a8e1f9a7b8632bc78f7499ccc0ab4d12c2))
+
 ## [1.14.4](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.14.3...import-in-the-middle-v1.14.4) (2025-09-25)
 
 
