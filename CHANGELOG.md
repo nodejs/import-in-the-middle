@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.15.0...import-in-the-middle-v2.0.0) (2025-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* convert all modules running in loader thread to ESM ([#210](https://github.com/nodejs/import-in-the-middle/issues/210))
+
+### Features
+
+* convert all modules running in loader thread to ESM ([#210](https://github.com/nodejs/import-in-the-middle/issues/210)) ([da7c7a6](https://github.com/nodejs/import-in-the-middle/commit/da7c7a6904a40bf394b7b2a271a2838711c5417c))
+
 ## [1.15.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.14.4...import-in-the-middle-v1.15.0) (2025-10-09)
 
 
