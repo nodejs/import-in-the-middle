@@ -5,7 +5,9 @@
 
 ### ⚠ BREAKING CHANGES
 
-* convert all modules running in loader thread to ESM ([#210](https://github.com/nodejs/import-in-the-middle/issues/210))
+Converting all modules running in the loader thread to ESM should not be a
+breaking change for most users since it primarily affects internal implementation
+details. However, if you were referencing internal CJS files like `hook.js` this will no longer work.
 
 ### Features
 
