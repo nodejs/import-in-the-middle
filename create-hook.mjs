@@ -5,7 +5,10 @@
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules } from 'module'
-import { getExports as getExportsImpl } from './lib/get-exports.mjs'
+import {
+  getExports as getExportsImpl,
+  hasModuleExportsCJSDefault
+} from './lib/get-exports.mjs'
 
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
@@ -231,7 +234,16 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
   }
 
   for (const n of exportNames) {
-    if (n === 'default' && excludeDefault) continue
+    if (excludeDefault) {
+      const isDefault = n === 'default' ||
+        (
+          n === 'module.exports' &&
+          context.format === 'commonjs' &&
+          hasModuleExportsCJSDefault
+        )
+
+      if (isDefault) continue
+    }
 
     if (isStarExportLine(n) === true) {
       const [, modFile] = n.split('* from ')
