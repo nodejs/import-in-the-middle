@@ -1,6 +1,6 @@
 # import-in-the-middle
 
-**`import-in-the-middle`** is an module loading interceptor inspired by
+**`import-in-the-middle`** is a module loading interceptor inspired by
 [`require-in-the-middle`](https://npm.im/require-in-the-middle), but
 specifically for ESM modules. In fact, it can even modify modules after loading
 time.
