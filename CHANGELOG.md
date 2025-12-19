@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.0...import-in-the-middle-v2.0.1) (2025-12-18)
+
+
+### Bug Fixes
+
+* properly hook submodule package exports ([#215](https://github.com/nodejs/import-in-the-middle/issues/215)) ([a20f47a](https://github.com/nodejs/import-in-the-middle/commit/a20f47a3013105a235f2ba48bc17319f7a57636c))
+
 ## [2.0.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v1.15.0...import-in-the-middle-v2.0.0) (2025-10-14)
 
 

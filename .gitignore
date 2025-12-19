@@ -1,6 +1,7 @@
 package-lock.json
 yarn.lock
 node_modules
+!test/fixtures/node_modules
 coverage
 .DS_Store
 test/check-exports/package.json
