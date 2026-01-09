@@ -140,14 +140,16 @@ function Hook (modules, options, hookFn) {
 
     if (modules) {
       for (const moduleName of modules) {
-        if (moduleName === specifier) {
-          callHookFn(hookFn, namespace, name, baseDir)
-        } else if (moduleName === name) {
+        const nameMatch = moduleName === name
+        const specMatch = moduleName === specifier
+        if (nameMatch || specMatch) {
           if (baseDir) {
             if (internals) {
               name = name + path.sep + path.relative(baseDir, fileURLToPath(filename))
             } else {
-              if (!getExperimentalPatchInternals() && !baseDir.endsWith(specifiers.get(filename))) continue
+              if (!getExperimentalPatchInternals() && !specMatch && !baseDir.endsWith(specifiers.get(filename))) {
+                continue
+              }
             }
           }
           callHookFn(hookFn, namespace, name, baseDir)
