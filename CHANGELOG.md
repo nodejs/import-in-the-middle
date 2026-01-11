@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.1...import-in-the-middle-v2.0.2) (2026-01-11)
+
+
+### Bug Fixes
+
+* grammar issue in README.md ([#216](https://github.com/nodejs/import-in-the-middle/issues/216)) ([46e4a2a](https://github.com/nodejs/import-in-the-middle/commit/46e4a2a9ad250c06fb52c9b782370071a6d1f3cc))
+* properly handle internals when specifier matches ([#220](https://github.com/nodejs/import-in-the-middle/issues/220)) ([05e4216](https://github.com/nodejs/import-in-the-middle/commit/05e4216e10d11c7eb996d4124f36e476f3a6d42f))
+
 ## [2.0.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.0...import-in-the-middle-v2.0.1) (2025-12-18)
 
 
