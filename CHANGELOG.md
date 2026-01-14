@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.4](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.3...import-in-the-middle-v2.0.4) (2026-01-14)
+
+
+### Bug Fixes
+
+* do not instrument the top level module ([#225](https://github.com/nodejs/import-in-the-middle/issues/225)) ([b563b35](https://github.com/nodejs/import-in-the-middle/commit/b563b35c74b96554b5112905391ec3842162b7ee))
+
 ## [2.0.3](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.2...import-in-the-middle-v2.0.3) (2026-01-13)
 
 
