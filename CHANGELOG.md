@@ -6,6 +6,7 @@
 ### Bug Fixes
 
 * handle lazy initialization and circular dependencies ([#229](https://github.com/nodejs/import-in-the-middle/issues/229)) ([d1421dc](https://github.com/nodejs/import-in-the-middle/commit/d1421dc0ae65ce6da5de5cb58f41af99f9d87371))
+* entrypoint can be treated as CommonJS when loader chains add query params to file URLs ([#223](https://github.com/nodejs/import-in-the-middle/issues/223)) ([60ab14a](https://github.com/nodejs/import-in-the-middle/commit/60ab14aeed8960b5dec4bec571a81649363e256e))
 
 ## [2.0.4](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.3...import-in-the-middle-v2.0.4) (2026-01-14)
 
