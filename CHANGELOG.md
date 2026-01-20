@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.5](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.4...import-in-the-middle-v2.0.5) (2026-01-20)
+
+
+### Bug Fixes
+
+* handle lazy initialization and circular dependencies ([#229](https://github.com/nodejs/import-in-the-middle/issues/229)) ([d1421dc](https://github.com/nodejs/import-in-the-middle/commit/d1421dc0ae65ce6da5de5cb58f41af99f9d87371))
+
 ## [2.0.4](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.3...import-in-the-middle-v2.0.4) (2026-01-14)
 
 
