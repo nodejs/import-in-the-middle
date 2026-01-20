@@ -381,7 +381,7 @@ export function createHook (meta) {
     // "main" module (e.g. require.main === module). Wrapping changes how they
     // are evaluated, and can make them exit without doing anything.
     if (parentURL === '') {
-      if (!EXTENSION_RE.test(result.url)) {
+      if (!EXTENSION_RE.test(result.url) && !hasIitm(result.url)) {
         entrypoint = result.url
         return { url: result.url, format: 'commonjs' }
       }
