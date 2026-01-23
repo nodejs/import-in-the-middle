@@ -23,7 +23,7 @@ const HANDLED_FORMATS = new Set(['builtin', 'module', 'commonjs'])
 const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 
 let getExports
-if (NODE_MAJOR >= 20 || (NODE_MAJOR === 18 && NODE_MINOR >= 19)) {
+if (NODE_MAJOR > 16 || (NODE_MAJOR === 16 && NODE_MINOR >= 16)) {
   getExports = getExportsImpl
 } else {
   getExports = (url) => import(url).then(Object.keys)
@@ -60,9 +60,6 @@ function deleteIitm (url) {
     if (urlObj.searchParams.has('iitm')) {
       urlObj.searchParams.delete('iitm')
       resultUrl = urlObj.href
-      if (resultUrl.startsWith('file:node:')) {
-        resultUrl = resultUrl.replace('file:', '')
-      }
       if (resultUrl.startsWith('file:///node:')) {
         resultUrl = resultUrl.replace('file:///', '')
       }
@@ -294,13 +291,25 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
 
       addSetter(n, `
       let ${variableName}
+      __overridden[${objectKey}] = false
+      let ${variableName}Defer = false
       try {
         ${variableName} = _[${objectKey}] = namespace[${objectKey}]
       } catch (err) {
         if (!(err instanceof ReferenceError)) throw err
+        ${variableName}Defer = true
+      }
+
+      if (${variableName}Defer || ${variableName} === undefined) {
+        __pending.push(__makeUpdater(
+          ${objectKey},
+          () => namespace[${objectKey}],
+          (v) => { ${variableName} = _[${objectKey}] = v }
+        ))
       }
       export { ${variableName} as ${reExportedName} }
       set[${objectKey}] = (v) => {
+        __overridden[${objectKey}] = true
         ${variableName} = v
         return true
       }
@@ -376,7 +385,7 @@ export function createHook (meta) {
     // "main" module (e.g. require.main === module). Wrapping changes how they
     // are evaluated, and can make them exit without doing anything.
     if (parentURL === '') {
-      if (!EXTENSION_RE.test(result.url)) {
+      if (!EXTENSION_RE.test(result.url) && !hasIitm(result.url)) {
         entrypoint = result.url
         return { url: result.url, format: 'commonjs' }
       }
@@ -476,8 +485,64 @@ import * as namespace from ${JSON.stringify(realUrl)}
 const _ = Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } })
 const set = {}
 const get = {}
+const __overridden = Object.create(null)
+let __pending = []
+
+function __makeUpdater (key, read, assign) {
+  return () => {
+    if (__overridden[key] === true) return true
+    try {
+      const v = read()
+      if (v !== undefined) {
+        assign(v)
+        return true
+      }
+      return false
+    } catch (err) {
+      if (err instanceof ReferenceError) return false
+      throw err
+    }
+  }
+}
+
+function __flushPendingOnce () {
+  if (__pending.length === 0) return
+  const next = []
+  for (const fn of __pending) {
+    // If it still throws ReferenceError, keep it for the (single) next attempt.
+    if (fn() !== true) next.push(fn)
+  }
+  __pending = next
+}
 
 ${Array.from(setters.values()).join('\n')}
+
+if (__pending.length > 0) {
+  queueMicrotask(() => {
+    __flushPendingOnce()
+
+    if (__pending.length > 0) {
+      const __retryDelays = [0, 10, 50]
+      const __schedulePending = (i) => {
+        if (__pending.length === 0) return
+        if (i >= __retryDelays.length) {
+          // Give up: leave exports as-is to avoid unbounded retries.
+          __pending = []
+          return
+        }
+
+        const t = setTimeout(() => {
+          __flushPendingOnce()
+          __schedulePending(i + 1)
+        }, __retryDelays[i])
+        // Don't keep the process alive just for best-effort retries.
+        if (t && typeof t.unref === 'function') t.unref()
+      }
+
+      __schedulePending(0)
+    }
+  })
+}
 
 register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(originalSpecifier)})
 `
@@ -512,12 +577,19 @@ register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(originalSpeci
   // For Node.js 16.12.0 and higher.
   async function load (url, context, parentLoad) {
     if (hasIitm(url)) {
-      const { source } = await getSource(url, context, parentLoad)
-      return {
-        source,
-        shortCircuit: true,
-        format: 'module'
+      const result = await getSource(url, context, parentLoad)
+      // If wrapping failed, `getSource()` may have fallen back to `parentLoad`,
+      // which can legally return `source: null` (e.g. for non-JS formats).
+      if (result && typeof result === 'object' && result.source != null) {
+        return {
+          source: result.source,
+          shortCircuit: true,
+          format: 'module'
+        }
       }
+
+      // Fall back to the parent loader with the original (non-iitm) URL.
+      return parentLoad(deleteIitm(url), context)
     }
 
     return parentLoad(url, context)

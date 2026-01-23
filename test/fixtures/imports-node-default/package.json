@@ -1,0 +1,9 @@
+{
+  "name": "imports-node-default",
+  "imports": {
+    "#x": {
+      "node": "./target.js"
+    }
+  }
+}
+

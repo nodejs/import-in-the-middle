@@ -11,6 +11,27 @@
           "default": "./something.mjs"
         }
       },
+      "#require-default-only": {
+        "require": {
+          "default": "./cjs-module-exports-no-named.js"
+        }
+      },
+      "#imports-node-only": {
+        "node": "./something.js"
+      },
+      "#imports-default-only": {
+        "default": "./cjs-module-exports-no-named.js"
+      },
+      "#import-node-only": {
+        "import": {
+          "node": "./foo.mjs"
+        }
+      },
+      "#import-default-only": {
+        "import": {
+          "default": "./foo.mjs"
+        }
+      },
       "#main-entry-point-string" : "./something.js",
       "#main-entry-point-external" : "some-external-cjs-module"
     }

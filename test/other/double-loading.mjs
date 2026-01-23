@@ -7,7 +7,9 @@ import { doesNotThrow } from 'assert'
 
 const env = {
   ...process.env,
-  NODE_OPTIONS: '--no-warnings --experimental-loader ./test/fixtures/double-loader.mjs --experimental-loader ./hook.mjs'
+  // Use the test harness loader so IITM doesn't wrap its own implementation
+  // files (keeps c8 coverage attribution sane).
+  NODE_OPTIONS: '--no-warnings --experimental-loader ./test/fixtures/double-loader.mjs --experimental-loader ./test/generic-loader.mjs'
 }
 
 doesNotThrow(() => {
