@@ -147,20 +147,24 @@ function Hook (modules, options, hookFn) {
     }
 
     if (modules) {
-      for (const moduleName of modules) {
-        const nameMatch = moduleName === name
-        const specMatch = moduleName === specifier
-        if (nameMatch || specMatch) {
-          if (baseDir) {
-            if (internals) {
-              name = name + path.sep + path.relative(baseDir, fileURLToPath(filename))
-            } else {
-              if (!getExperimentalPatchInternals() && !specMatch && !baseDir.endsWith(specifiers.get(filename))) {
-                continue
-              }
-            }
+      for (const matchArg of modules) {
+        if (matchArg === name) {
+          if (!baseDir) {
+            // built-in module (or unexpected non file:// name?)
+            callHookFn(hookFn, namespace, name, baseDir)
+          } else if (internals) {
+            const internalPath = name + path.sep + path.relative(baseDir, fileURLToPath(filename))
+            callHookFn(hookFn, namespace, internalPath, baseDir)
+          } else if (baseDir.endsWith(specifiers.get(filename))) {
+            // An import of the top-level module (e.g. `import 'ioredis'`).
+            // Note: Slight behaviour difference from RITM. RITM uses
+            // `require.resolve(name)` to see if `filename` is the module
+            // main file, which will catch `require('ioredis/built/index.js')`.
+            // The check here will not catch `import 'ioredis/built/index.js'`.
+            callHookFn(hookFn, namespace, name, baseDir)
           }
-          callHookFn(hookFn, namespace, name, baseDir)
+        } else if (matchArg === specifier) {
+          callHookFn(hookFn, namespace, specifier, baseDir)
         }
       }
     } else {
