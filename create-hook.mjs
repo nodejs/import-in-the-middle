@@ -12,7 +12,6 @@ import {
 
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
-let experimentalPatchInternals = false
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
@@ -332,10 +331,6 @@ export function createHook (meta) {
     global.__import_in_the_middle_initialized__ = true
 
     if (data) {
-      if (data.experimentalPatchInternals) {
-        experimentalPatchInternals = true
-      }
-
       includeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.include, 'include')
       excludeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.exclude, 'exclude')
 
@@ -476,7 +471,6 @@ export function createHook (meta) {
           source: `
 import { register } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(realUrl)}
-${experimentalPatchInternals ? `import { setExperimentalPatchInternals } from '${iitmURL}'\nsetExperimentalPatchInternals(true)` : ''}
 
 // Mimic a Module object (https://tc39.es/ecma262/#sec-module-namespace-objects).
 const _ = Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } })
