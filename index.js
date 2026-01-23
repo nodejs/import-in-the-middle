@@ -10,8 +10,7 @@ const { MessageChannel } = require('worker_threads')
 const {
   importHooks,
   specifiers,
-  toHook,
-  getExperimentalPatchInternals
+  toHook
 } = require('./lib/register')
 
 function addHook (hook) {
