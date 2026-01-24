@@ -6,14 +6,12 @@ Hook(['some-external-module', 'some-external-module'], { internals: true }, (exp
   hits.push(name)
 })
 
-;(async () => {
-  await import('../fixtures/load-external-modules.mjs')
+await import('../fixtures/load-external-modules.mjs')
 
-  // Should get hits for each of the two 'some-external-module' Hook entries.
-  deepStrictEqual(hits, [
-    'some-external-module/sub.mjs',
-    'some-external-module/sub.mjs',
-    'some-external-module/index.mjs',
-    'some-external-module/index.mjs'
-  ])
-})()
+// Should get hits for each of the two 'some-external-module' Hook entries.
+deepStrictEqual(hits, [
+  'some-external-module/sub.mjs',
+  'some-external-module/sub.mjs',
+  'some-external-module/index.mjs',
+  'some-external-module/index.mjs'
+])

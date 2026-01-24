@@ -6,12 +6,10 @@ Hook(['some-external-module', 'some-external-module/sub'], { internals: true }, 
   hits.push(name)
 })
 
-;(async () => {
-  await import('../fixtures/load-external-modules.mjs')
+await import('../fixtures/load-external-modules.mjs')
 
-  deepStrictEqual(hits, [
-    'some-external-module/sub.mjs', // module name match, internals:true
-    'some-external-module/sub', // specifier match
-    'some-external-module/index.mjs' // module name match, internals:true
-  ])
-})()
+deepStrictEqual(hits, [
+  'some-external-module/sub.mjs', // module name match, internals:true
+  'some-external-module/sub', // specifier match
+  'some-external-module/index.mjs' // module name match, internals:true
+])
