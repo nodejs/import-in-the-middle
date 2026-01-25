@@ -5,11 +5,16 @@
 import { spawn } from 'child_process'
 import { strictEqual } from 'assert'
 
-const nodeProcess = spawn('node', [
-  '--loader',
-  './hook.mjs',
+// Use the test harness loader so IITM doesn't wrap its own implementation files
+// (keeps c8 coverage attribution sane).
+const nodeProcess = spawn(process.execPath, [
+  '--no-warnings',
+  '--experimental-loader',
+  './test/generic-loader.mjs',
   './test/fixtures/cyclical-driver.mjs'
-])
+], {
+  env: { ...process.env, NODE_OPTIONS: '' }
+})
 
 // expected output should be 'testB\ntestA' but the hook fails when running against files
 // with cylical dependencies

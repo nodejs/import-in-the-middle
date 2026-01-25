@@ -44,11 +44,13 @@ API. However, for this to be able to hook non-dynamic imports, it needs to be
 registered before your app code is evaluated via the `--import` command-line option.
 
 `my-loader.mjs`
+
 ```js
 import * as module from 'module'
 
 module.register('import-in-the-middle/hook.mjs', import.meta.url)
 ```
+
 ```shell
 node --import=./my-loader.mjs ./my-code.mjs
 ```
@@ -56,7 +58,7 @@ node --import=./my-loader.mjs ./my-code.mjs
 When registering the loader hook programmatically, it's possible to pass a list
 of modules, file URLs or regular expressions to either `exclude` or specifically
 `include` which modules are intercepted. This is useful if a module is not
-compatible with the loader hook. 
+compatible with the loader hook.
 
 > **Note:** This feature is incompatible with the `{internals: true}` Hook option
 
@@ -74,7 +76,8 @@ module.register('import-in-the-middle/hook.mjs', import.meta.url, {
 })
 ```
 
-### Only Intercepting Hooked modules 
+### Only Intercepting Hooked modules
+
 > **Note:** This feature is experimental and is incompatible with the `{internals: true}` Hook option
 
 If you are `Hook`'ing all modules before they are imported, for example in a
@@ -82,6 +85,7 @@ module loaded via the Node.js `--import` CLI argument, you can configure the
 loader to intercept only modules that were specifically hooked.
 
 `instrument.mjs`
+
 ```js
 import { register } from 'module'
 import { Hook, createAddHookMessageChannel } from 'import-in-the-middle'
@@ -94,11 +98,13 @@ Hook(['fs'], (exported, name, baseDir) => {
   // Instrument the fs module
 })
 
-// Ensure that the loader has acknowledged all the modules 
+// Ensure that the loader has acknowledged all the modules
 // before we allow execution to continue
 await waitForAllMessagesAcknowledged()
 ```
+
 `my-app.mjs`
+
 ```js
 import * as fs from 'fs'
 // fs will be instrumented!
@@ -107,23 +113,6 @@ fs.readFileSync('file.txt')
 
 ```shell
 node --import=./instrument.mjs ./my-app.mjs
-```
-
-### Experimental `experimentalPatchInternals` option
-
-It was found that `import-in-the-middle` didn't match the hooking behavior of `require-in-the-middle` in some cases: 
-https://github.com/nodejs/import-in-the-middle/issues/185
-
-The `experimentalPatchInternals` option forces the loader to match the behavior of `require-in-the-middle` in these cases.
-
-This option is experimental and may be removed or made the default in the future.
-
-```js
-import { register } from 'module'
-
-register('import-in-the-middle/hook.mjs', import.meta.url, {
-  data: { experimentalPatchInternals: true }
-})
 ```
 
 ## Limitations

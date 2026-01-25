@@ -103,7 +103,7 @@ jobs:
           path: html_report/
       - name: Verify Minimum Coverage Is Met
         run: >
-          lcov --summary all_lcov.info | grep lines | cut -d' ' -f 4 | cut -d% -f 1 | xargs node -e "x=process.argv[1];console.log(x);assert(+x >= 80)"
+          lcov --summary all_lcov.info | grep lines | cut -d' ' -f 4 | cut -d% -f 1 | xargs node -e "x=process.argv[1];console.log(x);assert(+x >= 95)"
 
   integration:
     runs-on: ubuntu-latest
