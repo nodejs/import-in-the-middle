@@ -25,22 +25,22 @@ const hookModuleURL = String(pathToFileURL(
 register(hookModuleURL, import.meta.url, registerOptions)
 
 Hook(['some-external-module'], { internals: true }, (exported, name) => {
-  equal(name, 'some-external-module/index.mjs')
+  equal(name, 'some-external-module')
   exported.foo += '-mutated'
 })
 
 Hook(['some-external-cjs-module'], { internals: true }, (exported, name) => {
-  equal(name, 'some-external-cjs-module/index.js')
+  equal(name, 'some-external-cjs-module')
   exported.foo += '-mutated (cjs)'
 })
 
 Hook(['@scope/some-scoped-module'], { internals: true }, (exported, name) => {
-  equal(name, '@scope/some-scoped-module/index.mjs')
+  equal(name, '@scope/some-scoped-module')
   exported.foo += '-mutated'
 })
 
 Hook(['@scope/some-scoped-cjs-module'], { internals: true }, (exported, name) => {
-  equal(name, '@scope/some-scoped-cjs-module/index.js')
+  equal(name, '@scope/some-scoped-cjs-module')
   exported.foo += '-mutated (cjs)'
 })
 

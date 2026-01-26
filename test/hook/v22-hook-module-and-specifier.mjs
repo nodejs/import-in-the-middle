@@ -11,5 +11,5 @@ await import('../fixtures/load-external-modules.mjs')
 deepStrictEqual(hits, [
   'some-external-module/sub.mjs', // module name match, internals:true
   'some-external-module/sub', // specifier match
-  'some-external-module/index.mjs' // module name match, internals:true
+  'some-external-module' // module name match, internals:true
 ])
