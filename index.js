@@ -6,6 +6,7 @@ const path = require('path')
 const parse = require('module-details-from-path')
 const { fileURLToPath } = require('url')
 const { MessageChannel } = require('worker_threads')
+const { isBuiltin } = require('module')
 
 const {
   importHooks,
@@ -124,11 +125,17 @@ function Hook (modules, options, hookFn) {
 
   this._iitmHook = (name, namespace, specifier) => {
     const filename = name
-    const isBuiltin = name.startsWith('node:')
+    const isNodeUrl = name.startsWith('node:')
     let baseDir
 
-    if (isBuiltin) {
-      name = name.replace(/^node:/, '')
+    if (isNodeUrl) {
+      // Normalize builtin module name to *not* have 'node:' prefix, unless
+      // required, as it is for 'node:test' and some others.  `module.isBuiltin`
+      // is available in all Node.js versions that have node:-only modules.
+      const unprefixed = name.slice(5)
+      if (typeof isBuiltin !== 'function' || isBuiltin(unprefixed)) {
+        name = unprefixed
+      }
     } else {
       if (name.startsWith('file://')) {
         const stackTraceLimit = Error.stackTraceLimit
