@@ -6,7 +6,11 @@ const path = require('path')
 const parse = require('module-details-from-path')
 const { fileURLToPath } = require('url')
 const { MessageChannel } = require('worker_threads')
-const { isBuiltin } = require('module')
+
+let { isBuiltin } = require('module')
+if (!isBuiltin) {
+  isBuiltin = () => true
+}
 
 const {
   importHooks,
@@ -133,7 +137,7 @@ function Hook (modules, options, hookFn) {
       // required, as it is for 'node:test' and some others.  `module.isBuiltin`
       // is available in all Node.js versions that have node:-only modules.
       const unprefixed = name.slice(5)
-      if (typeof isBuiltin !== 'function' || isBuiltin(unprefixed)) {
+      if (isBuiltin(unprefixed)) {
         name = unprefixed
       }
     } else {
