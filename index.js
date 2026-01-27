@@ -6,7 +6,6 @@ const path = require('path')
 const moduleDetailsFromPath = require('module-details-from-path')
 const { fileURLToPath } = require('url')
 const { MessageChannel } = require('worker_threads')
-const { isBuiltin } = require('module')
 
 const {
   importHooks,
