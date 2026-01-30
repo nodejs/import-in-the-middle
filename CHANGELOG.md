@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.6...import-in-the-middle-v3.0.0) (2026-01-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* drop support for Node.js < v18 ([#230](https://github.com/nodejs/import-in-the-middle/issues/230))
+
+### Miscellaneous Chores
+
+* drop support for Node.js &lt; v18 ([#230](https://github.com/nodejs/import-in-the-middle/issues/230)) ([f463b13](https://github.com/nodejs/import-in-the-middle/commit/f463b1342ca946608432c9be39fecb86e7f7cbf0))
+
 ## [2.0.6](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.5...import-in-the-middle-v2.0.6) (2026-01-27)
 
 
