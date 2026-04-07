@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.0.0...import-in-the-middle-v3.0.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* handle file specifiers from turbopacked packages better ([#246](https://github.com/nodejs/import-in-the-middle/issues/246)) ([04539fb](https://github.com/nodejs/import-in-the-middle/commit/04539fb5ceb9e4816933bd4310c1334077af1643))
+
 ## [3.0.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v2.0.6...import-in-the-middle-v3.0.0) (2026-01-30)
 
 
