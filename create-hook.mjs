@@ -265,12 +265,19 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
       const objectKey = JSON.stringify(n)
       const reExportedName = n === 'default' ? n : objectKey
 
+      // For the module.exports synthetic export (Node 23+), fall back to $default
+      // when namespace['module.exports'] is not exposed by the native ESM namespace
+      // (builtins don't expose it). This ensures the IITM hook proxy returns the
+      // actual CJS value (e.g. EventEmitter) when an instrumentor reads
+      // capturedExports['module.exports'], rather than undefined.
+      const moduleExportsFallback = n === 'module.exports' ? ' ?? $default' : ''
+
       addSetter(n, `
       let ${variableName}
       __overridden[${objectKey}] = false
       let ${variableName}Defer = false
       try {
-        ${variableName} = _[${objectKey}] = namespace[${objectKey}]
+        ${variableName} = _[${objectKey}] = namespace[${objectKey}]${moduleExportsFallback}
       } catch (err) {
         if (!(err instanceof ReferenceError)) throw err
         ${variableName}Defer = true
@@ -279,11 +286,11 @@ async function processModule ({ srcUrl, context, parentGetSource, parentResolve,
       if (${variableName}Defer || ${variableName} === undefined) {
         __pending.push(__makeUpdater(
           ${objectKey},
-          () => namespace[${objectKey}],
+          () => namespace[${objectKey}]${moduleExportsFallback},
           (v) => { ${variableName} = _[${objectKey}] = v }
         ))
       }
-      export { ${variableName} as ${reExportedName} }
+      ${(n === 'module.exports' && (srcUrl.startsWith('node:') || builtinModules.includes(srcUrl))) ? '' : `export { ${variableName} as ${reExportedName} }`}
       set[${objectKey}] = (v) => {
         __overridden[${objectKey}] = true
         ${variableName} = v
@@ -307,6 +314,14 @@ export function createHook (meta) {
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   let includeModules, excludeModules
+
+  // Track CJS module URLs that IITM has wrapped. On Node 24+, CJS modules loaded
+  // via loadCJSModule (in an ESM import chain) have their require() calls for
+  // builtins routed through the ESM resolver. Without this guard, IITM would
+  // intercept those require() calls and return an ESM namespace object instead
+  // of the native CJS module value (e.g. EventEmitter constructor), breaking
+  // patterns like `class App extends require('events') {}`.
+  const cjsInIitmChain = new Set()
 
   async function initialize (data) {
     if (global.__import_in_the_middle_initialized__) {
@@ -405,6 +420,13 @@ export function createHook (meta) {
       return result
     }
 
+    // When a CJS module is loaded by an IITM shim, its require() calls for
+    // builtins may be routed through the ESM resolver on Node 24+. Skip IITM
+    // wrapping in that case so require() returns the native module value.
+    if (cjsInIitmChain.has(parentURL)) {
+      return result
+    }
+
     // We don't want to attempt to wrap native modules
     if (result.url.endsWith('.node')) {
       return result
@@ -448,6 +470,11 @@ export function createHook (meta) {
         })
         // If the module loaded successfully, we can remove the specifier to reduce memory usage early.
         specifiers.delete(realUrl)
+        // Track CJS modules so their transitive require() calls bypass IITM.
+        // context.format is set to 'commonjs' by getCjsExports during processModule.
+        if (context.format === 'commonjs') {
+          cjsInIitmChain.add(realUrl)
+        }
         return {
           source: `
 import { register } from '${iitmURL}'
