@@ -423,7 +423,11 @@ export function createHook (meta) {
     // When a CJS module is loaded by an IITM shim, its require() calls for
     // builtins may be routed through the ESM resolver on Node 24+. Skip IITM
     // wrapping in that case so require() returns the native module value.
+    // We also propagate the membership to the resolved child so that its own
+    // transitive require() calls are likewise skipped (the entire synchronous
+    // CJS require chain must remain unwrapped to avoid ERR_VM_MODULE_LINK_FAILURE).
     if (cjsInIitmChain.has(parentURL)) {
+      cjsInIitmChain.add(result.url)
       return result
     }
 
@@ -588,6 +592,24 @@ register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(originalSpeci
 
       // Fall back to the parent loader with the original (non-iitm) URL.
       return parentLoad(deleteIitm(url), context)
+    }
+
+    // On Node 22+, when a CJS module is loaded through the ESM translator and
+    // another loader hook provides its source (instead of leaving source null
+    // for Node to read natively), require() calls inside that CJS module for
+    // packages using the "module-sync" exports condition fail with
+    // ERR_VM_MODULE_LINK_FAILURE. Work around this Node bug by stripping
+    // hook-provided source for CJS modules in the synchronous require chain,
+    // forcing Node to use its native CJS loader which handles this correctly.
+    if (cjsInIitmChain.has(url)) {
+      const result = await parentLoad(url, context)
+      if (result.format === 'commonjs' && result.source != null) {
+        return {
+          format: result.format,
+          source: undefined
+        }
+      }
+      return result
     }
 
     return parentLoad(url, context)

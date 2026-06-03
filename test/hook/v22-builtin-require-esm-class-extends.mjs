@@ -11,12 +11,6 @@
 // causing:
 //   TypeError: Class extends value [object Module] is not a constructor or null
 
-const [NODE_MAJOR] = process.versions.node.split('.').map(Number)
-if (NODE_MAJOR < 22) {
-  console.log(`Skipping ${process.env.IITM_TEST_FILE || import.meta.url} ...`)
-  process.exit(0)
-}
-
 import { strictEqual, ok } from 'assert'
 import Hook from '../../index.js'
 
