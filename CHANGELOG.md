@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.0.1...import-in-the-middle-v3.0.2) (2026-06-08)
+
+
+### Bug Fixes
+
+* Updated proxying logic for builtins that are used as CJS ([#250](https://github.com/nodejs/import-in-the-middle/issues/250)) ([f69eb8f](https://github.com/nodejs/import-in-the-middle/commit/f69eb8f13c91b7088003e7390b4f54c5076aa50b))
+
 ## [3.0.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.0.0...import-in-the-middle-v3.0.1) (2026-04-07)
 
 
