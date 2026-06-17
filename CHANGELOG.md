@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.0.2...import-in-the-middle-v3.1.0) (2026-06-17)
+
+
+### Features
+
+* add synchronous loader hooks via module.registerHooks ([#253](https://github.com/nodejs/import-in-the-middle/issues/253)) ([dd7e550](https://github.com/nodejs/import-in-the-middle/commit/dd7e5501f0cb901b8e4979f819e9deda6c84e2fc))
+
 ## [3.0.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.0.1...import-in-the-middle-v3.0.2) (2026-06-08)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "import-in-the-middle",
-  "version": "3.0.2",
+  "version": "3.1.0",
   "description": "Intercept imports in Node.js",
   "engines": {
     "node": ">=18"
