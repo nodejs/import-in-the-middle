@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.1.0...import-in-the-middle-v3.2.0) (2026-06-22)
+
+
+### Features
+
+* add shouldInclude predicate for consumer-owned module matching ([#255](https://github.com/nodejs/import-in-the-middle/issues/255)) ([b2590d0](https://github.com/nodejs/import-in-the-middle/commit/b2590d054a5cfc6d6820c06edb4ff4987a10b5c4))
+
 ## [3.1.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.0.2...import-in-the-middle-v3.1.0) (2026-06-17)
 
 
