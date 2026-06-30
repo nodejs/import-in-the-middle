@@ -14,6 +14,13 @@ import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
 const specifiers = new Map()
 const isWin = process.platform === 'win32'
 
+// Depth at which `processModule` starts tracking visited URLs to break an
+// `export *` cycle. Real re-export chains are only a few levels deep, so this
+// is far beyond any legitimate graph yet well below the call-stack limit a
+// cycle would otherwise hit. Below it the recursion pays only an integer
+// compare per level and allocates no set.
+const STAR_CYCLE_DEPTH = 100
+
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
 const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
@@ -271,12 +278,20 @@ function buildSetter (n, srcUrl) {
  * @param {string} params.srcUrl The full URL to the module to process.
  * @param {object} params.context Provided by the loaders API.
  * @param {boolean} [params.excludeDefault = false] Exclude the default export.
+ * @param {number} [params.depth = 0] Star-re-export recursion depth. Used to
+ * detect `export *` cycles (`a` re-exports `b`, `b` re-exports `a`) cheaply:
+ * the acyclic common case pays only an integer compare per level, and the
+ * cycle-tracking set is allocated only once recursion is implausibly deep.
+ * @param {Set<string>} [params.seen] URLs currently on the recursion stack,
+ * created lazily once `depth` crosses {@link STAR_CYCLE_DEPTH}. A URL is added
+ * before descending into its subtree and removed once that subtree finishes, so
+ * it tracks the active path rather than every URL ever visited.
  *
  * @returns {Generator<Array, Map<string, string>>} A generator that yields I/O
  * operations and ultimately returns the shimmed setters for all the exports
  * from the module and any transitive export all modules.
  */
-function * processModule ({ srcUrl, context, excludeDefault = false }) {
+function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen }) {
   const exportNames = yield * getExports(srcUrl, context)
   const starExports = new Set()
   const setters = new Map()
@@ -330,14 +345,36 @@ function * processModule ({ srcUrl, context, excludeDefault = false }) {
       // parent's `format` to know if this sub-module is ESM or CJS!
       const result = yield [RESOLVE, newSpecifier, { parentURL: srcUrl }]
 
-      const subSetters = yield * processModule({
-        srcUrl: result.url,
-        context: { ...context, format: result.format },
-        excludeDefault: true
-      })
+      // `export *` graphs are normally only a handful of levels deep. A cycle
+      // (`a` re-exports `b`, `b` re-exports `a`) instead recurses without bound
+      // and exhausts memory. Rather than track every URL on the common shallow
+      // path, only start recording once the depth is implausibly large for a
+      // real graph; from there a re-export pointing back at a module already on
+      // the recursion stack is the cycle, and is skipped (its exports are
+      // collected by the in-progress ancestor frame). `seen` mirrors the stack,
+      // not every URL visited: a module reached and fully processed through one
+      // sibling branch must stay reachable through a later, more direct branch,
+      // so it is removed again once its subtree finishes.
+      if (depth >= STAR_CYCLE_DEPTH) {
+        seen ??= new Set()
+        if (seen.has(result.url)) continue
+        seen.add(result.url)
+      }
 
-      for (const [name, setter] of subSetters.entries()) {
-        addSetter(name, setter, true)
+      try {
+        const subSetters = yield * processModule({
+          srcUrl: result.url,
+          context: { ...context, format: result.format },
+          excludeDefault: true,
+          depth: depth + 1,
+          seen
+        })
+
+        for (const [name, setter] of subSetters.entries()) {
+          addSetter(name, setter, true)
+        }
+      } finally {
+        seen?.delete(result.url)
       }
     } else {
       addSetter(n, buildSetter(n, srcUrl))
