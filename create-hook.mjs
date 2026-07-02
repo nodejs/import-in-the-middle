@@ -7,7 +7,8 @@ import { inspect } from 'util'
 import { builtinModules } from 'module'
 import {
   getExports,
-  hasModuleExportsCJSDefault
+  hasModuleExportsCJSDefault,
+  takeCachedSource
 } from './lib/get-exports.mjs'
 import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
@@ -850,6 +851,14 @@ register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(originalSpeci
       return result
     }
 
+    // This is the `import * as namespace from <realUrl>` the wrapper emits, for
+    // a module whose source the export pass already read. Serve that read
+    // instead of letting Node read the file again.
+    const cached = takeCachedSource(url)
+    if (cached !== undefined) {
+      return { ...cached, shortCircuit: true }
+    }
+
     return parentLoad(url, context)
   }
 
@@ -882,6 +891,14 @@ register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(originalSpeci
         }
       }
       return result
+    }
+
+    // This is the `import * as namespace from <realUrl>` the wrapper emits, for
+    // a module whose source the export pass already read. Serve that read
+    // instead of letting Node read the file again.
+    const cached = takeCachedSource(url)
+    if (cached !== undefined) {
+      return { ...cached, shortCircuit: true }
     }
 
     return nextLoad(url, context)
