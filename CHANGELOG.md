@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.3.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.2.0...import-in-the-middle-v3.3.0) (2026-07-02)
+
+
+### Features
+
+* instrument type-stripped TypeScript modules ([#258](https://github.com/nodejs/import-in-the-middle/issues/258)) ([3c6b456](https://github.com/nodejs/import-in-the-middle/commit/3c6b4568a3d23028576ffb728e908a4d06e48523))
+
+
+### Bug Fixes
+
+* guard against circular export-star recursion ([#261](https://github.com/nodejs/import-in-the-middle/issues/261)) ([b957de3](https://github.com/nodejs/import-in-the-middle/commit/b957de3667292ec2ea3b8729704664d1324eaa8f))
+* keep get-esm-exports synchronous so require() works ([#266](https://github.com/nodejs/import-in-the-middle/issues/266)) ([4244b25](https://github.com/nodejs/import-in-the-middle/commit/4244b2512f6256af0ff916f6dc98cc65d988187a))
+* resolve re-exported values from their defining module ([#263](https://github.com/nodejs/import-in-the-middle/issues/263)) ([5ef34cb](https://github.com/nodejs/import-in-the-middle/commit/5ef34cbb59fb65cd0e25b27e06236d6c95c69176))
+
+
+### Performance Improvements
+
+* replace acorn with es-module-lexer for ESM parsing ([#259](https://github.com/nodejs/import-in-the-middle/issues/259)) ([b8cc8af](https://github.com/nodejs/import-in-the-middle/commit/b8cc8af150f46d09b1f447e01a89344d2e647c2c))
+* shrink generated wrapper source ([#264](https://github.com/nodejs/import-in-the-middle/issues/264)) ([491d968](https://github.com/nodejs/import-in-the-middle/commit/491d968d5e80cf0f0add2caeb0f447106caf32c3))
+
 ## [3.2.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.1.0...import-in-the-middle-v3.2.0) (2026-06-22)
 
 
