@@ -3,6 +3,10 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 
+// Wrap a CJS module too, so the specifiers cleanup is exercised on the CJS
+// path as well as the ESM one below.
+await import('./cjs-transitive-a.js')
+
 const dir = await mkdtemp(join(tmpdir(), 'iitm-specifiers-'))
 
 // Import lots of unique module URLs to stress the loader's internal specifier tracking.
