@@ -214,9 +214,9 @@ function buildSetter (n, srcUrl, namespaceVar) {
   const objectKey = JSON.stringify(n)
   const reExportedName = n === 'default' ? n : objectKey
 
-  // `1` makes __bind fall back to namespace['default'] for the module.exports
-  // synthetic export, which builtins don't expose on the native ESM namespace.
-  const fallback = n === 'module.exports' ? ', 1' : ''
+  // Fall back to namespace['default'] for the module.exports synthetic export,
+  // which builtins don't expose on the native ESM namespace.
+  const useFallback = n === 'module.exports'
 
   // Builtins don't expose the module.exports synthetic name, so skip its re-export.
   const reExportLine = (n === 'module.exports' && (srcUrl.startsWith('node:') || builtinModules.includes(srcUrl)))
@@ -224,7 +224,7 @@ function buildSetter (n, srcUrl, namespaceVar) {
     : `export { ${variableName} as ${reExportedName} }`
 
   return `let ${variableName}
-__bind(${objectKey}, ${namespaceVar}, v => { ${variableName} = v }, () => ${variableName}${fallback})
+__binder.bind(${objectKey}, ${namespaceVar}, v => { ${variableName} = v }, () => ${variableName}, ${useFallback})
 ${reExportLine}`
 }
 
@@ -651,98 +651,16 @@ export function createHook (meta) {
     }
 
     return `
-import { register } from '${iitmURL}'
+import { register, ModuleBinder } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(realUrl)}
 ${originImports}
-// Mimic a Module object (https://tc39.es/ecma262/#sec-module-namespace-objects).
-const _ = Object.create(null, { [Symbol.toStringTag]: { value: 'Module' } })
-const set = {}
-const get = {}
-const __overridden = Object.create(null)
-let __pending = []
-
-function __makeUpdater (key, read, assign) {
-  return () => {
-    if (__overridden[key] === true) return true
-    try {
-      const v = read()
-      if (v !== undefined) {
-        assign(v)
-        return true
-      }
-      return false
-    } catch (err) {
-      if (err instanceof ReferenceError) return false
-      throw err
-    }
-  }
-}
-
-function __flushPendingOnce () {
-  if (__pending.length === 0) return
-  const next = []
-  for (const fn of __pending) {
-    // If it still throws ReferenceError, keep it for the (single) next attempt.
-    if (fn() !== true) next.push(fn)
-  }
-  __pending = next
-}
-
-function __bind (key, source, write, read, useFallback) {
-  const readSource = useFallback
-    ? () => source[key] ?? source['default']
-    : () => source[key]
-  __overridden[key] = false
-  let deferred = false
-  try {
-    const v = readSource()
-    write(v)
-    _[key] = v
-  } catch (err) {
-    if (!(err instanceof ReferenceError)) throw err
-    deferred = true
-  }
-  if (deferred || read() === undefined) {
-    __pending.push(__makeUpdater(key, readSource, (v) => { write(v); _[key] = v }))
-  }
-  set[key] = (v) => {
-    __overridden[key] = true
-    write(v)
-    return true
-  }
-  get[key] = read
-}
+const __binder = new ModuleBinder()
 
 ${Array.from(setters.values()).join('\n')}
 
-if (__pending.length > 0) {
-  queueMicrotask(() => {
-    __flushPendingOnce()
+__binder.flush()
 
-    if (__pending.length > 0) {
-      const __retryDelays = [0, 10, 50]
-      const __schedulePending = (i) => {
-        if (__pending.length === 0) return
-        if (i >= __retryDelays.length) {
-          // Give up: leave exports as-is to avoid unbounded retries.
-          __pending = []
-          return
-        }
-
-        const t = setTimeout(() => {
-          __flushPendingOnce()
-          __schedulePending(i + 1)
-        }, __retryDelays[i])
-        // Don't keep the process alive just for best-effort retries.
-        if (t && typeof t.unref === 'function') t.unref()
-      }
-
-      __schedulePending(0)
-    }
-  })
-}
-
-register(${JSON.stringify(realUrl)}, _, set, get, ${JSON.stringify(originalSpecifier)})
+register(${JSON.stringify(realUrl)}, __binder.namespace, __binder.set, __binder.get, ${JSON.stringify(originalSpecifier)})
 `
   }
 
