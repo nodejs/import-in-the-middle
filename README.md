@@ -228,3 +228,12 @@ On Node.js versions where type stripping is not enabled by default, run with
 * While bindings to module exports end up being "re-bound" when modified in a
   hook, dynamically imported modules cannot be altered after they're loaded.
 * Modules loaded via `require` are not affected at all.
+* A module's set of export *names* is assumed to be stable for the lifetime of
+  the process. `import-in-the-middle` reads a module's source once to lex its
+  exports and reuses that export set on later loads of the same URL. An upstream
+  loader that returns a *different set of exports* for the same URL across calls
+  — a stateful codegen loader, or one that varies its output by `context` — is
+  not supported and will be instrumented with the export set from its first
+  load. Idempotent transforms (type stripping, AST instrumentation, minifiers)
+  are unaffected, and the actual module still executes the source its real load
+  returns; only the interceptable export *names* are memoized.
