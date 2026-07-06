@@ -1,7 +1,3 @@
-// Unless explicitly stated otherwise all files in this repository are licensed under the Apache 2.0 License.
-//
-// This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
-
 // Unit-tests the ModuleBinder that generated wrappers use. The wrapper boilerplate
 // (seed export value, expose set/get, defer TDZ reads) lives here as real code
 // rather than emitted per wrapper, so it is exercised directly instead of only
