@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.3.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.3.0...import-in-the-middle-v3.3.1) (2026-07-07)
+
+
+### Performance Improvements
+
+* hoist generated wrapper binding runtime ([#267](https://github.com/nodejs/import-in-the-middle/issues/267)) ([4f41140](https://github.com/nodejs/import-in-the-middle/commit/4f41140d44f91448899580cbb97f558539005657))
+* read each wrapped module from disk once ([#265](https://github.com/nodejs/import-in-the-middle/issues/265)) ([22b40aa](https://github.com/nodejs/import-in-the-middle/commit/22b40aa86003934c944b0f586be3889e8c230616))
+
 ## [3.3.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.2.0...import-in-the-middle-v3.3.0) (2026-07-02)
 
 
