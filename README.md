@@ -115,6 +115,36 @@ fs.readFileSync('file.txt')
 node --import=./instrument.mjs ./my-app.mjs
 ```
 
+## Bundler integrations
+
+Bundlers can generate the same live-binding wrapper as the Node.js loader with
+`createWrapperModule`:
+
+```js
+import { createWrapperModule } from 'import-in-the-middle/bundler.mjs'
+
+const wrapper = await createWrapperModule({
+  module: { url, format, source, specifier },
+  resolve,
+  load
+})
+```
+
+`url` is the canonical `file:` or `node:` URL reported to hooks. `resolve` and
+`load` adapt the bundler's resolver and source loader to the same URL-based
+module graph.
+
+The result contains generated `code`, an `imports` manifest, `watchFiles`, and
+`sideEffects: true`. The code imports only relative placeholder specifiers. The
+bundler adapter provides it as a virtual module and maps each placeholder using
+the manifest, so filesystem paths, virtual IDs, external modules, and cache
+invalidation remain owned by the bundler. `watchFiles` are file URLs that the
+adapter converts to its native watch-dependency format.
+
+The runtime import in the manifest must be bundled with the wrapper. Keeping it
+external can create a second hook registry at runtime. It is CommonJS and must
+go through the bundler's normal CommonJS transform.
+
 ## Synchronous loader hooks
 
 On Node.js versions that support
