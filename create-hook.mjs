@@ -17,7 +17,6 @@ import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 // this file's acorn / cjs-module-lexer dependency graph.
 export { supportsSyncHooks }
 
-const specifiers = new Map()
 const isWin = process.platform === 'win32'
 
 // Depth at which `processModule` starts tracking visited URLs to break an
@@ -36,6 +35,9 @@ const HANDLED_FORMATS = new Set([
   'builtin', 'module', 'commonjs', 'module-typescript', 'commonjs-typescript'
 ])
 const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
+
+/** @typedef {import('node:module').LoadHookContext} LoadContext */
+/** @typedef {import('node:module').LoadFnOutput} LoadResult */
 
 function hasIitm (url) {
   // Fast path: avoid URL parsing on the hot path when there's clearly no iitm.
@@ -404,7 +406,11 @@ function addIitm (url) {
   return urlObj.href
 }
 
+/**
+ * @param {{ url: string }} meta
+ */
 export function createHook (meta) {
+  const specifiers = new Map()
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   let includeModules, excludeModules
@@ -689,10 +695,19 @@ register(${JSON.stringify(realUrl)}, __binder.namespace, __binder.set, __binder.
     emitWarning(err)
   }
 
+  /**
+   * @param {string} url
+   * @param {LoadContext} context
+   * @param {(url: string, context?: Partial<LoadContext>) => LoadResult | Promise<LoadResult>} parentGetSource
+   */
   async function getSource (url, context, parentGetSource) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
       const originalSpecifier = specifiers.get(realUrl)
+      if (originalSpecifier === undefined) {
+        specifiers.delete(url)
+        return parentGetSource(url, context)
+      }
 
       try {
         const { setters, originNamespaces } = await driveAsync(
@@ -713,10 +728,19 @@ register(${JSON.stringify(realUrl)}, __binder.namespace, __binder.set, __binder.
   // Synchronous counterpart to `getSource`, for `module.registerHooks`. Drives
   // `processModule` straight through; all bookkeeping and source generation is
   // shared with `getSource`.
+  /**
+   * @param {string} url
+   * @param {LoadContext} context
+   * @param {(url: string, context?: Partial<LoadContext>) => LoadResult} nextLoad
+   */
   function getSourceSync (url, context, nextLoad) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
       const originalSpecifier = specifiers.get(realUrl)
+      if (originalSpecifier === undefined) {
+        specifiers.delete(url)
+        return nextLoad(url, context)
+      }
 
       try {
         const { setters, originNamespaces } = driveSync(
