@@ -651,7 +651,7 @@ export function createHook (meta) {
     }
 
     return `
-import { register, ModuleBinder } from '${iitmURL}'
+import { register, ModuleBinder } from ${JSON.stringify(iitmURL)}
 import * as namespace from ${JSON.stringify(realUrl)}
 ${originImports}
 const __binder = new ModuleBinder()
