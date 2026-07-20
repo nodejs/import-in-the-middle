@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.3.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.3.1...import-in-the-middle-v3.3.2) (2026-07-20)
+
+
+### Bug Fixes
+
+* delegate tagged modules to their owning loader ([#276](https://github.com/nodejs/import-in-the-middle/issues/276)) ([e0c57bd](https://github.com/nodejs/import-in-the-middle/commit/e0c57bd810d89d74e6a22a14c243d650cbda8a3c))
+* escape loader URL in generated wrappers ([#275](https://github.com/nodejs/import-in-the-middle/issues/275)) ([86ca0e5](https://github.com/nodejs/import-in-the-middle/commit/86ca0e579cb8b592b0ae49cef9bc834b3971592d))
+* skip code generation on broken maglev ([#271](https://github.com/nodejs/import-in-the-middle/issues/271)) ([ae914ac](https://github.com/nodejs/import-in-the-middle/commit/ae914ac41a4cc9215cbaf4fa5ec48fbe3fa8e7b3))
+
 ## [3.3.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.3.0...import-in-the-middle-v3.3.1) (2026-07-07)
 
 
