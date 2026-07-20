@@ -12,8 +12,8 @@ jobs:
     # Therefore, we run linting separately and only once.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 'lts/*'
       - run: npm install
@@ -41,9 +41,9 @@ jobs:
           - windows-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm install
@@ -53,7 +53,7 @@ jobs:
           mv coverage/lcov.info coverage/${{ matrix.node-version }}_${{ matrix.os }}_lcov.info
       - name: Archive code coverage results
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage_${{ matrix.os }}_${{ matrix.node-version}}
           if-no-files-found: ignore
@@ -69,9 +69,9 @@ jobs:
     needs: build
     steps:
       # We need to check out the source in order for genhtml to work
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Download reports' artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: downloaded_artifacts
       - name: Install lcov
@@ -89,7 +89,7 @@ jobs:
           mkdir html_report
           genhtml -o html_report all_lcov.info
       - name: Upload HTML report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: 00_html_coverage_report
           if-no-files-found: ignore
@@ -101,10 +101,10 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # We only test that exports match on a single node version because many of
       # the libraries we test do not support older node versions
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 'lts/*'
       - run: npm install
