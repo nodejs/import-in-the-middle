@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.3](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.3.2...import-in-the-middle-v3.3.3) (2026-07-23)
+
+
+### Bug Fixes
+
+* strip TypeScript after loaders normalize format ([#278](https://github.com/nodejs/import-in-the-middle/issues/278)) ([a4f0969](https://github.com/nodejs/import-in-the-middle/commit/a4f0969b4d90e937cc26f0bf8811e9bc782d19ec))
+
 ## [3.3.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.3.1...import-in-the-middle-v3.3.2) (2026-07-20)
 
 
