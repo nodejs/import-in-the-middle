@@ -38,6 +38,7 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 
 /** @typedef {import('node:module').LoadHookContext} LoadContext */
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
+/** @typedef {string | { specifier: string, format: 'module-typescript' | 'commonjs-typescript' }} SpecifierData */
 
 function hasIitm (url) {
   // Fast path: avoid URL parsing on the hot path when there's clearly no iitm.
@@ -410,6 +411,7 @@ function addIitm (url) {
  * @param {{ url: string }} meta
  */
 export function createHook (meta) {
+  /** @type {Map<string, SpecifierData>} */
   const specifiers = new Map()
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
@@ -583,7 +585,11 @@ export function createHook (meta) {
       }
     }
 
-    specifiers.set(result.url, specifier)
+    // Preserve the format before an outer loader can normalize it.
+    const specifierData = result.format === 'module-typescript' || result.format === 'commonjs-typescript'
+      ? { specifier, format: result.format }
+      : specifier
+    specifiers.set(result.url, specifierData)
 
     return {
       url: addIitm(result.url),
@@ -703,18 +709,25 @@ register(${JSON.stringify(realUrl)}, __binder.namespace, __binder.set, __binder.
   async function getSource (url, context, parentGetSource) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
-      const originalSpecifier = specifiers.get(realUrl)
-      if (originalSpecifier === undefined) {
+      const specifierData = specifiers.get(realUrl)
+      if (specifierData === undefined) {
         specifiers.delete(url)
         return parentGetSource(url, context)
       }
 
+      let originalSpecifier = specifierData
+      let processContext = context
+      if (typeof specifierData !== 'string') {
+        originalSpecifier = specifierData.specifier
+        processContext = { ...context, format: specifierData.format }
+      }
+
       try {
         const { setters, originNamespaces } = await driveAsync(
-          processModule({ srcUrl: realUrl, context }),
+          processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: parentGetSource }
         )
-        return { source: onWrapSuccess(realUrl, context, originalSpecifier, setters, originNamespaces) }
+        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, setters, originNamespaces) }
       } catch (cause) {
         onWrapFailure(realUrl, cause)
         // Revert back to the non-iitm URL
@@ -736,18 +749,25 @@ register(${JSON.stringify(realUrl)}, __binder.namespace, __binder.set, __binder.
   function getSourceSync (url, context, nextLoad) {
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
-      const originalSpecifier = specifiers.get(realUrl)
-      if (originalSpecifier === undefined) {
+      const specifierData = specifiers.get(realUrl)
+      if (specifierData === undefined) {
         specifiers.delete(url)
         return nextLoad(url, context)
       }
 
+      let originalSpecifier = specifierData
+      let processContext = context
+      if (typeof specifierData !== 'string') {
+        originalSpecifier = specifierData.specifier
+        processContext = { ...context, format: specifierData.format }
+      }
+
       try {
         const { setters, originNamespaces } = driveSync(
-          processModule({ srcUrl: realUrl, context }),
+          processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: nextLoad }
         )
-        return { source: onWrapSuccess(realUrl, context, originalSpecifier, setters, originNamespaces) }
+        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, setters, originNamespaces) }
       } catch (cause) {
         onWrapFailure(realUrl, cause)
         url = realUrl
