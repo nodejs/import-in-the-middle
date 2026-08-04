@@ -137,7 +137,8 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
         source,
         originalSpecifier: moduleData.specifier,
         data: moduleData.data,
-        runtimeSpecifier: RUNTIME_SPECIFIER
+        runtimeSpecifier: RUNTIME_SPECIFIER,
+        preserveOuterBindings: true
       }),
       imports: [{
         specifier: RUNTIME_SPECIFIER,

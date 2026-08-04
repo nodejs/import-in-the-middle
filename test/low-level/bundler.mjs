@@ -163,8 +163,10 @@ const commonJsWrapper = await createWrapperModule({
 
 strictEqual(commonJsWrapper.imports.length, 1)
 strictEqual(commonJsWrapper.imports[0].kind, 'runtime')
+match(commonJsWrapper.code, /^\(function \(\) \{/)
 match(commonJsWrapper.code, /registerCommonJS/)
 doesNotMatch(commonJsWrapper.code, /^(?:import|export) /m)
+doesNotMatch(commonJsWrapper.code, /function \(exports, require, module/)
 
 const loadedCommonJsWrapper = await createWrapperModule({
   module: {
