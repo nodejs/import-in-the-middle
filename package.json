@@ -43,8 +43,10 @@
     "@node-rs/crc32": "^1.10.6",
     "@react-email/components": "^0.0.19",
     "@types/node": "^18.0.6",
+    "@vercel/nft": "^1.10.2",
     "c8": "^7.14.0",
     "date-fns": "^3.6.0",
+    "esbuild": "^0.28.1",
     "eslint": "^8.57.1",
     "eslint-config-standard": "^17.1.0",
     "eslint-plugin-import": "^2.32.0",
@@ -56,7 +58,8 @@
     "openai": "4.47.2",
     "ts-node": "^10.9.2",
     "typescript": "^4.9.5",
-    "vue": "^3.5.26"
+    "vue": "^3.5.26",
+    "webpack": "^5.109.2"
   },
   "dependencies": {
     "cjs-module-lexer": "^2.2.0",

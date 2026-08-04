@@ -2,11 +2,19 @@
 //
 // This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
 
+import { readFileSync } from 'fs'
+import { builtinModules } from 'module'
+import { dirname, extname, join } from 'path'
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
-import { builtinModules } from 'module'
 import { driveSync, driveAsync } from './lib/io.mjs'
-import { buildWrapperSource, processModule } from './lib/wrapper.mjs'
+import './lib/register.js'
+import { sourceToString } from './lib/source.mjs'
+import {
+  buildCommonJSWrapperSource,
+  buildWrapperSource,
+  processModule
+} from './lib/wrapper.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 
 // Re-exported for backwards compatibility: `supportsSyncHooks` now lives in its
@@ -26,10 +34,19 @@ const HANDLED_FORMATS = new Set([
   'builtin', 'module', 'commonjs', 'module-typescript', 'commonjs-typescript'
 ])
 const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
+const stripTypeScriptTypes = process.getBuiltinModule?.('module')?.stripTypeScriptTypes
+const packageTypes = new Map()
 
 /** @typedef {import('node:module').LoadHookContext} LoadContext */
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
-/** @typedef {string | { specifier: string, format: 'module-typescript' | 'commonjs-typescript' }} SpecifierData */
+/** @typedef {{ name: string, origin: string }} StarBinding */
+/**
+ * @typedef {object} SpecifierData
+ * @property {string} specifier
+ * @property {string} [format]
+ * @property {unknown} [data]
+ * @property {boolean} [commonjs]
+ */
 
 function hasIitm (url) {
   // Fast path: avoid URL parsing on the hot path when there's clearly no iitm.
@@ -73,6 +90,49 @@ function deleteIitm (url) {
   return resultUrl
 }
 
+
+/**
+ * @param {string} url
+ * @returns {string | undefined}
+ */
+function getFileFormat (url) {
+  if (!url.startsWith('file:')) return undefined
+  const filename = fileURLToPath(url)
+  const extension = extname(filename)
+  if (extension === '.mjs') return 'module'
+  if (extension === '.cjs') return 'commonjs'
+  if (extension === '.mts') return 'module-typescript'
+  if (extension === '.cts') return 'commonjs-typescript'
+  if (extension !== '.js' && extension !== '.ts') return undefined
+
+  let directory = dirname(filename)
+  const visited = []
+  while (true) {
+    if (packageTypes.has(directory)) {
+      const type = packageTypes.get(directory)
+      for (const visitedDirectory of visited) packageTypes.set(visitedDirectory, type)
+      return type === 'module'
+        ? (extension === '.ts' ? 'module-typescript' : 'module')
+        : (extension === '.ts' ? 'commonjs-typescript' : 'commonjs')
+    }
+
+    visited.push(directory)
+    try {
+      const type = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')).type
+      packageTypes.set(directory, type)
+      continue
+    } catch (error) {
+      if (error.code !== 'ENOENT') return undefined
+    }
+
+    const parent = dirname(directory)
+    if (parent === directory) {
+      for (const visitedDirectory of visited) packageTypes.set(visitedDirectory, undefined)
+      return extension === '.ts' ? 'commonjs-typescript' : 'commonjs'
+    }
+    directory = parent
+  }
+}
 
 /**
  * Determines whether the input is a bare specifier, file URL or a regular expression.
@@ -157,10 +217,12 @@ export function createHook (meta) {
   /** @type {Map<string, SpecifierData>} */
   const specifiers = new Map()
   let cachedResolve
-  const iitmURL = new URL('lib/register.js', meta.url).toString()
+  const iitmURL = new URL('lib/register.js', meta.url).href
+  const iitmPath = fileURLToPath(iitmURL)
   let includeModules, excludeModules
   let shouldInclude = defaultShouldInclude
   let disableCjsSourceStripping = false
+  let hookCommonJS = false
 
   // Track CJS module URLs that IITM has wrapped. On Node 24+, CJS modules loaded
   // via loadCJSModule (in an ESM import chain) have their require() calls for
@@ -215,6 +277,7 @@ export function createHook (meta) {
   function applyOptions (data) {
     includeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.include, 'include')
     excludeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.exclude, 'exclude')
+    hookCommonJS = data.commonjs === true
 
     // A consumer can supply its own matcher as `shouldInclude(url, specifier)`,
     // taking ownership of the include/exclude decision instead of expressing it
@@ -262,7 +325,7 @@ export function createHook (meta) {
   // once the parent loader has turned the specifier into a resolved URL. The
   // only difference between the asynchronous and synchronous hooks is whether
   // that resolution was awaited, so all the wrapping decisions live here.
-  function finishResolve (result, specifier, context, parentURL) {
+  function finishResolve (result, specifier, context, parentURL, synchronous) {
     // Do not wrap the entrypoint module. Many CLIs check whether they are the
     // "main" module (e.g. require.main === module). Wrapping changes how they
     // are evaluated, and can make them exit without doing anything.
@@ -279,24 +342,26 @@ export function createHook (meta) {
       return result
     }
 
-    // The synchronous hooks (`module.registerHooks`) fire for `require()` as well
-    // as `import`, but iitm only owns the ESM graph: CommonJS modules are
-    // instrumented separately through require-in-the-middle, and `require()` must
-    // return the native, mutable module value (e.g. graceful-fs does
-    // `Object.defineProperty(require('fs'), ...)`, which throws on a frozen ESM
-    // namespace). Node reports the active module system in `context.conditions`
-    // ('require' vs 'import'), so leave any require() resolution untouched. The
-    // asynchronous hook never sees the 'require' condition, so this is a no-op
-    // there and only affects the synchronous path.
-    if (context.conditions?.includes('require')) {
+    const isRequire = context.conditions?.includes('require') === true
+    let format = result.format
+    let isModule = format === 'module' || format === 'module-typescript'
+
+    // Without the opt-in, keep CommonJS owned by require-in-the-middle. ESM
+    // loaded through require() can still use the synchronous ESM wrapper.
+    if (isRequire && !isModule && (!synchronous || !hookCommonJS)) {
       return result
     }
 
-    // `shouldInclude` is always set (the include/exclude list matcher by default,
-    // a consumer-provided predicate otherwise), so no nullish check is needed.
-    if (!shouldInclude(result.url, specifier)) {
+    const inclusion = shouldInclude(result.url, specifier)
+    if (!inclusion) {
       return result
     }
+    const data = typeof inclusion === 'object' ? inclusion.data : undefined
+    if (synchronous && hookCommonJS && format == null) {
+      format = getFileFormat(result.url)
+      isModule = format === 'module' || format === 'module-typescript'
+    }
+    const isCommonJS = format === 'commonjs' || format === 'commonjs-typescript'
 
     if (isIitm(parentURL, meta) || (parentURL && hasIitm(parentURL))) {
       return result
@@ -333,11 +398,20 @@ export function createHook (meta) {
       }
     }
 
+    if (synchronous && hookCommonJS && (isCommonJS || (isRequire && !isModule))) {
+      specifiers.set(result.url, {
+        specifier,
+        format,
+        data,
+        commonjs: true
+      })
+      return result
+    }
+
+    if (isRequire && !isModule) return result
+
     // Preserve the format before an outer loader can normalize it.
-    const specifierData = result.format === 'module-typescript' || result.format === 'commonjs-typescript'
-      ? { specifier, format: result.format }
-      : specifier
-    specifiers.set(result.url, specifierData)
+    specifiers.set(result.url, { specifier, format, data })
 
     return {
       url: addIitm(result.url),
@@ -345,7 +419,7 @@ export function createHook (meta) {
       // Node's synchronous resolver drops `format: 'builtin'` for bare builtin
       // specifiers (`require('crypto')` -> `node:crypto`), so restore it;
       // otherwise the load hook reads `node:crypto` from disk and throws ENOENT.
-      format: result.format ?? (result.url.startsWith('node:') ? 'builtin' : undefined)
+      format: format ?? (result.url.startsWith('node:') ? 'builtin' : undefined)
     }
   }
 
@@ -367,7 +441,7 @@ export function createHook (meta) {
     }
     const result = await parentResolve(newSpecifier, context)
 
-    return finishResolve(result, specifier, context, parentURL)
+    return finishResolve(result, specifier, context, parentURL, false)
   }
 
   // Synchronous counterpart to `resolve`, for `module.registerHooks`. The
@@ -391,19 +465,18 @@ export function createHook (meta) {
     }
     const result = nextResolve(newSpecifier, context)
 
-    return finishResolve(result, specifier, context, parentURL)
+    return finishResolve(result, specifier, context, parentURL, true)
   }
-
 
   /**
    * Finalizes a successful wrap and builds its module source.
    *
    * @param {string} realUrl The URL of the wrapped module.
    * @param {LoadContext} context Its loader context.
-   * @param {string} originalSpecifier The original import specifier.
+   * @param {SpecifierData} specifierData The module's interception data.
    * @param {string[] | Map<string, string | StarBinding>} bindings Its exported bindings.
    */
-  function onWrapSuccess (realUrl, context, originalSpecifier, bindings) {
+  function onWrapSuccess (realUrl, context, specifierData, bindings) {
     specifiers.delete(realUrl)
     // context.format is set to 'commonjs' by getCjsExports during processModule.
     if (context.format === 'commonjs') {
@@ -412,7 +485,8 @@ export function createHook (meta) {
     return buildWrapperSource({
       realUrl,
       bindings,
-      originalSpecifier,
+      originalSpecifier: specifierData.specifier,
+      data: specifierData.data,
       runtimeSpecifier: iitmURL
     })
   }
@@ -435,6 +509,49 @@ export function createHook (meta) {
 
   /**
    * @param {string} url
+   * @param {LoadResult} result
+   * @param {SpecifierData} specifierData
+   * @returns {LoadResult}
+   */
+  function wrapCommonJS (url, result, specifierData) {
+    specifiers.delete(url)
+    const format = result.format ?? specifierData.format
+    let source = result.source
+
+    if (url.startsWith('node:')) {
+      source = `module.exports = process.getBuiltinModule(${JSON.stringify(url.slice(5))})\n`
+    } else if ((format === 'commonjs' || format === 'commonjs-typescript') && source == null && url.startsWith('file:')) {
+      source = readFileSync(fileURLToPath(url))
+    }
+
+    if (source == null || (format !== 'commonjs' && format !== 'commonjs-typescript' && !url.startsWith('node:'))) {
+      return result
+    }
+
+    try {
+      if (format === 'commonjs-typescript' && stripTypeScriptTypes !== undefined) {
+        source = stripTypeScriptTypes(sourceToString(source), { mode: 'strip' })
+      }
+      return {
+        ...result,
+        format: 'commonjs',
+        source: buildCommonJSWrapperSource({
+          realUrl: url,
+          source,
+          originalSpecifier: specifierData.specifier,
+          data: specifierData.data,
+          runtimeSpecifier: iitmPath
+        }),
+        shortCircuit: true
+      }
+    } catch (cause) {
+      onWrapFailure(url, cause)
+      return result
+    }
+  }
+
+  /**
+   * @param {string} url
    * @param {LoadContext} context
    * @param {(url: string, context?: Partial<LoadContext>) => LoadResult | Promise<LoadResult>} parentGetSource
    */
@@ -447,10 +564,8 @@ export function createHook (meta) {
         return parentGetSource(url, context)
       }
 
-      let originalSpecifier = specifierData
       let processContext = context
-      if (typeof specifierData !== 'string') {
-        originalSpecifier = specifierData.specifier
+      if (specifierData.format !== undefined) {
         processContext = { ...context, format: specifierData.format }
       }
 
@@ -459,7 +574,7 @@ export function createHook (meta) {
           processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: parentGetSource }
         )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
+        return { source: onWrapSuccess(realUrl, processContext, specifierData, bindings) }
       } catch (cause) {
         onWrapFailure(realUrl, cause)
         // Revert back to the non-iitm URL
@@ -487,10 +602,8 @@ export function createHook (meta) {
         return nextLoad(url, context)
       }
 
-      let originalSpecifier = specifierData
       let processContext = context
-      if (typeof specifierData !== 'string') {
-        originalSpecifier = specifierData.specifier
+      if (specifierData.format !== undefined) {
         processContext = { ...context, format: specifierData.format }
       }
 
@@ -499,7 +612,7 @@ export function createHook (meta) {
           processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: nextLoad }
         )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
+        return { source: onWrapSuccess(realUrl, processContext, specifierData, bindings) }
       } catch (cause) {
         onWrapFailure(realUrl, cause)
         url = realUrl
@@ -565,6 +678,18 @@ export function createHook (meta) {
 
       // Fall back to the parent loader with the original (non-iitm) URL.
       return nextLoad(deleteIitm(url), context)
+    }
+
+    const specifierData = specifiers.get(url)
+    if (specifierData?.commonjs === true) {
+      let result
+      try {
+        result = nextLoad(url, context)
+      } catch (error) {
+        specifiers.delete(url)
+        throw error
+      }
+      return wrapCommonJS(url, result, specifierData)
     }
 
     if (cjsInIitmChain.has(url) && !disableCjsSourceStripping) {

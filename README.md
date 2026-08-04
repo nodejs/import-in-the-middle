@@ -1,9 +1,9 @@
 # import-in-the-middle
 
 **`import-in-the-middle`** is a module loading interceptor inspired by
-[`require-in-the-middle`](https://npm.im/require-in-the-middle), but
-specifically for ESM modules. In fact, it can even modify modules after loading
-time.
+[`require-in-the-middle`](https://npm.im/require-in-the-middle). It supports ESM
+through Node.js loader hooks and can also intercept CommonJS when synchronous
+hooks are available.
 
 ## Usage
 
@@ -117,29 +117,41 @@ node --import=./instrument.mjs ./my-app.mjs
 
 ## Bundler integrations
 
-Bundlers can generate the same live-binding wrapper as the Node.js loader with
-`createWrapperModule`:
+Bundlers can generate ESM and CommonJS wrappers with `createWrapperModule`:
 
 ```js
 import { createWrapperModule } from 'import-in-the-middle/bundler.mjs'
 
 const wrapper = await createWrapperModule({
-  module: { url, format, source, specifier },
+  module: { url, format, source, specifier, target, data },
   resolve,
   load
 })
 ```
 
-`url` is the canonical `file:` or `node:` URL reported to hooks. `resolve` and
-`load` adapt the bundler's resolver and source loader to the same URL-based
-module graph.
+`url` is the canonical `file:` or `node:` URL reported to hooks. `specifier` is
+the original request. `target` is the bundler's opaque resolved value, such as
+an esbuild path/namespace/plugin-data object or a webpack resource. IITM passes
+it back unchanged in the import manifest and to `load(target, context)`.
 
-The result contains generated `code`, an `imports` manifest, `watchFiles`, and
-`sideEffects: true`. The code imports only relative placeholder specifiers. The
-bundler adapter provides it as a virtual module and maps each placeholder using
-the manifest, so filesystem paths, virtual IDs, external modules, and cache
-invalidation remain owned by the bundler. `watchFiles` are file URLs that the
-adapter converts to its native watch-dependency format.
+`resolve(specifier, context)` returns `{ url, format, target, watchFiles }`.
+IITM uses `url` and `format` to inspect re-exports while preserving `target` for
+the adapter. This keeps namespaces, query strings, external decisions, and
+loader state owned by the bundler.
+
+The result contains generated `code`, its `format`, an `imports` manifest,
+`watchFiles`, and `sideEffects: true`. ESM code imports relative placeholder
+specifiers. The adapter maps each placeholder to the corresponding manifest
+entry. CommonJS code contains the original source and only requires the runtime
+placeholder, so the bundler can still discover literal `require()` calls in the
+module source. The adapter must resolve those calls from the original module's
+context. `watchFiles` are canonical URLs that the adapter converts to its native
+watch-dependency format.
+
+`data` is optional JSON-serializable consumer metadata. IITM embeds it in the
+wrapper and passes it as the fourth argument to `Hook` callbacks. This lets an
+adapter carry package names, versions, or other build-time facts into a bundle
+without retaining build-machine paths.
 
 The runtime import in the manifest must be bundled with the wrapper. Keeping it
 external can create a second hook registry at runtime. It is CommonJS and must
@@ -166,7 +178,10 @@ pulled into the ESM graph until [nodejs/node#59929][]. The fix shipped in
 import { register, supportsSyncHooks } from 'import-in-the-middle/register-hooks.mjs'
 
 if (supportsSyncHooks()) {
-  register({ include: ['package-i-want-to-include'] })
+  register({
+    include: ['package-i-want-to-include'],
+    commonjs: true
+  })
 } else {
   // Fall back to the asynchronous loader, e.g. module.register('import-in-the-middle/hook.mjs').
 }
@@ -180,7 +195,10 @@ if (supportsSyncHooks()) {
 import { register } from 'import-in-the-middle/register-hooks.mjs'
 import { Hook } from 'import-in-the-middle'
 
-register({ include: ['package-i-want-to-include'] })
+register({
+  include: ['package-i-want-to-include'],
+  commonjs: true
+})
 
 Hook(['package-i-want-to-include'], (exported, name, baseDir) => {
   // Instrument the module
@@ -193,14 +211,21 @@ node --import=./instrument.mjs ./my-app.mjs
 
 `register()` accepts the same `include` / `exclude` options as the asynchronous
 loader and throws on a Node.js version where `supportsSyncHooks()` is `false`.
+Set `commonjs: true` to intercept CommonJS `require()` and CommonJS imported
+from ESM through the same `Hook` registry. It is opt-in because consumers that
+also install `require-in-the-middle` must disable one CommonJS path to avoid
+instrumenting a module twice. ESM loaded through `require()` is intercepted by
+the synchronous ESM wrapper.
 
 ### Custom matching with `shouldInclude`
 
 Instead of `include` / `exclude` lists, you can pass a `shouldInclude(url, specifier)`
 predicate to decide which modules are intercepted. It is called for every resolved
-module with the resolved URL and the import specifier; return a truthy value to
-intercept the module. When a predicate is provided it takes over the decision and
-the `include` / `exclude` options are ignored.
+module with the resolved URL and the import specifier. Return `true` to intercept
+the module, or return `{ data }` to intercept it and pass consumer metadata to
+the `Hook` callback. `data` must be JSON-serializable. When a predicate is
+provided it takes over the decision and the `include` / `exclude` options are
+ignored.
 
 This is useful when matching doesn't map cleanly onto bare specifiers, file URLs and
 regular expressions — for example a matcher built from your own configuration, or a
@@ -210,10 +235,15 @@ decision that depends on more than the specifier.
 import { register } from 'import-in-the-middle/register-hooks.mjs'
 
 register({
+  commonjs: true,
   shouldInclude (url, specifier) {
-    return specifier === 'package-i-want-to-include' ||
-      url.includes('/node_modules/some-scope/')
+    if (specifier !== 'package-i-want-to-include') return false
+    return { data: { version: '1.2.3' } }
   }
+})
+
+Hook(['package-i-want-to-include'], (exported, name, baseDir, data) => {
+  console.log(data.version)
 })
 ```
 
@@ -284,7 +314,8 @@ On Node.js versions where type stripping is not enabled by default, run with
 * You cannot add new exports to a module. You can only modify existing ones.
 * While bindings to module exports end up being "re-bound" when modified in a
   hook, dynamically imported modules cannot be altered after they're loaded.
-* Modules loaded via `require` are not affected at all.
+* Modules loaded via `require` are only affected by synchronous registration
+  with `commonjs: true`, or when the required target is ESM.
 * A module's set of export *names* is assumed to be stable for the lifetime of
   the process. `import-in-the-middle` reads a module's source once to lex its
   exports and reuses that export set on later loads of the same URL. An upstream

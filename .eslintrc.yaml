@@ -30,3 +30,5 @@ ignorePatterns:
   - test/fixtures/reexport-same-source.mjs
   - test/fixtures/reexport-explicit-override.mjs
   - test/fixtures/reexport-nested-agg.mjs
+  - test/fixtures/type-module/module.js
+  - test/fixtures/sync-commonjs-typescript.cts

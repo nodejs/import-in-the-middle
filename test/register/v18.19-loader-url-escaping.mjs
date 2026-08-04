@@ -23,7 +23,9 @@ try {
     'lib/get-esm-exports.mjs',
     'lib/get-exports.mjs',
     'lib/io.mjs',
-    'lib/register.js'
+    'lib/register.js',
+    'lib/source.mjs',
+    'lib/wrapper.mjs'
   ]
   const setupPromises = []
   for (const filename of packageFiles) {

@@ -13,9 +13,9 @@ if (!isBuiltin) {
 }
 
 const {
-  importHooks,
-  specifiers,
-  toHook
+  addHook,
+  removeHook,
+  specifiers
 } = require('./lib/register')
 
 /**
@@ -38,20 +38,18 @@ function isTurbopackSpecifier (specifier, baseDir) {
   return baseDir.endsWith(specifierWithoutTurbopackHash)
 }
 
-function addHook (hook) {
-  importHooks.push(hook)
-  toHook.forEach(([name, namespace, specifier]) => hook(name, namespace, specifier))
-}
-
-function removeHook (hook) {
-  const index = importHooks.indexOf(hook)
-  if (index > -1) {
-    importHooks.splice(index, 1)
-  }
-}
-
-function callHookFn (hookFn, namespace, name, baseDir) {
-  const newDefault = hookFn(namespace, name, baseDir)
+/**
+ * @param {Function} hookFn
+ * @param {object} namespace
+ * @param {string} name
+ * @param {string|undefined} baseDir
+ * @param {unknown} data
+ * @param {'module'|'commonjs'} format
+ * @returns {unknown}
+ */
+function callHookFn (hookFn, namespace, name, baseDir, data, format) {
+  const newDefault = hookFn(namespace, name, baseDir, data)
+  if (format === 'commonjs') return newDefault
   if (newDefault && newDefault !== namespace) {
     // Only ESM modules that actually export `default` can have it reassigned.
     // Some hooks return a value unconditionally; avoid crashing when the module
@@ -147,7 +145,7 @@ function Hook (modules, options, hookFn) {
     sendModulesToLoader(modules)
   }
 
-  this._iitmHook = (name, namespace, specifier) => {
+  this._iitmHook = (name, namespace, specifier, data, format) => {
     const loadUrl = name
     const isNodeUrl = loadUrl.startsWith('node:')
     let filePath, baseDir
@@ -178,32 +176,39 @@ function Hook (modules, options, hookFn) {
       }
     }
 
+    let replacement
     if (modules) {
       for (const matchArg of modules) {
+        let result
         if (filePath && matchArg === filePath) {
           // abspath match
-          callHookFn(hookFn, namespace, filePath, undefined)
+          result = callHookFn(hookFn, namespace, filePath, undefined, data, format)
         } else if (matchArg === name) {
           if (!baseDir) {
             // built-in module (or unexpected non file:// name?)
-            callHookFn(hookFn, namespace, name, baseDir)
+            result = callHookFn(hookFn, namespace, name, baseDir, data, format)
           } else if (baseDir.endsWith(specifiers.get(loadUrl)) || isTurbopackSpecifier(specifiers.get(loadUrl), baseDir)) {
             // An import of the top-level module (e.g. `import 'ioredis'`).
             // Note: Slight behaviour difference from RITM. RITM uses
             // `require.resolve(name)` to see if filename is the module
             // main file, which will catch `require('ioredis/built/index.js')`.
             // The check here will not catch `import 'ioredis/built/index.js'`.
-            callHookFn(hookFn, namespace, name, baseDir)
+            result = callHookFn(hookFn, namespace, name, baseDir, data, format)
           } else if (internals) {
             const internalPath = name + path.sep + path.relative(baseDir, filePath)
-            callHookFn(hookFn, namespace, internalPath, baseDir)
+            result = callHookFn(hookFn, namespace, internalPath, baseDir, data, format)
           }
         } else if (matchArg === specifier) {
-          callHookFn(hookFn, namespace, specifier, baseDir)
+          result = callHookFn(hookFn, namespace, specifier, baseDir, data, format)
+        }
+        if (result !== undefined) {
+          namespace = result
+          replacement = result
         }
       }
+      return replacement
     } else {
-      callHookFn(hookFn, namespace, name, baseDir)
+      return callHookFn(hookFn, namespace, name, baseDir, data, format)
     }
   }
 

@@ -4,10 +4,12 @@
 
 'use strict'
 
-import { builtinModules } from 'module'
-
 import { driveAsync } from './lib/io.mjs'
-import { buildWrapperSource, processModule } from './lib/wrapper.mjs'
+import {
+  buildCommonJSWrapperSource,
+  buildWrapperSource,
+  processModule
+} from './lib/wrapper.mjs'
 
 const RUNTIME_SPECIFIER = './__iitm_runtime__.js'
 const MODULE_SPECIFIER_PREFIX = './__iitm_module_'
@@ -19,6 +21,8 @@ const runtimeUrl = new URL('./lib/bundler-runtime.js', import.meta.url).href
  * @property {string} format
  * @property {string} specifier
  * @property {string | ArrayBuffer | ArrayBufferView} [source]
+ * @property {unknown} [target]
+ * @property {unknown} [data]
  */
 
 /**
@@ -31,6 +35,7 @@ const runtimeUrl = new URL('./lib/bundler-runtime.js', import.meta.url).href
  * @typedef {object} ResolveResult
  * @property {string} url
  * @property {string} [format]
+ * @property {unknown} [target]
  * @property {Iterable<string>} [watchFiles]
  */
 
@@ -38,8 +43,9 @@ const runtimeUrl = new URL('./lib/bundler-runtime.js', import.meta.url).href
  * @typedef {object} WrapperImport
  * @property {string} specifier
  * @property {'module' | 'runtime'} kind
- * @property {{ url: string, format?: string }} target
- * @property {boolean} external
+ * @property {string} url
+ * @property {string} [format]
+ * @property {unknown} target
  */
 
 /**
@@ -50,15 +56,16 @@ const runtimeUrl = new URL('./lib/bundler-runtime.js', import.meta.url).href
  */
 
 /**
- * Creates an ESM wrapper without embedding bundler-specific module identifiers.
+ * Creates a format-aware wrapper without embedding bundler-specific module identifiers.
  *
  * @param {object} options
  * @param {BundlerModule} options.module
  * @param {(specifier: string, context: ModuleContext) =>
  *   (ResolveResult | Promise<ResolveResult>)} options.resolve
- * @param {(url: string, context: ModuleContext) => (LoadResult | Promise<LoadResult>)} options.load
+ * @param {(target: unknown, context: ModuleContext) => (LoadResult | Promise<LoadResult>)} options.load
  * @returns {Promise<{
  *   code: string,
+ *   format: 'module' | 'commonjs',
  *   imports: WrapperImport[],
  *   watchFiles: string[],
  *   sideEffects: true
@@ -68,6 +75,10 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
   const context = { format: moduleData.format, cache: false }
   const watchFiles = new Set()
   const formats = new Map([[moduleData.url, moduleData.format]])
+  const targets = new Map([[
+    moduleData.url,
+    moduleData.target ?? { url: moduleData.url, format: moduleData.format }
+  ]])
 
   if (moduleData.url.startsWith('file:')) {
     watchFiles.add(moduleData.url)
@@ -86,7 +97,7 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
       }
     }
 
-    const result = await load(url, loadContext)
+    const result = await load(targets.get(url), loadContext)
     if (result.format !== undefined) {
       formats.set(url, result.format)
     }
@@ -116,7 +127,49 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
         watchFiles.add(watchFile)
       }
     }
+    targets.set(result.url, result.target ?? { url: result.url, format: result.format })
     return result
+  }
+
+  /** @type {WrapperImport[]} */
+  const imports = [{
+    specifier: RUNTIME_SPECIFIER,
+    kind: 'runtime',
+    url: runtimeUrl,
+    format: 'commonjs',
+    target: {
+      url: runtimeUrl,
+      format: 'commonjs'
+    }
+  }]
+
+  if (moduleData.format === 'commonjs' || moduleData.format === 'commonjs-typescript') {
+    let source = moduleData.source
+    if (source === undefined) {
+      const result = await loadModule(moduleData.url, context)
+      source = result.source
+    }
+    if (source === undefined) {
+      throw new TypeError(`The bundler load adapter returned no source for '${moduleData.url}'`)
+    }
+
+    return {
+      code: buildCommonJSWrapperSource({
+        realUrl: moduleData.url,
+        source,
+        originalSpecifier: moduleData.specifier,
+        data: moduleData.data,
+        runtimeSpecifier: RUNTIME_SPECIFIER
+      }),
+      format: 'commonjs',
+      imports,
+      watchFiles: Array.from(watchFiles),
+      sideEffects: true
+    }
+  }
+
+  if (moduleData.format !== 'module' && moduleData.format !== 'module-typescript' && moduleData.format !== 'builtin') {
+    throw new TypeError(`Unsupported module format '${moduleData.format}'`)
   }
 
   const { bindings } = await driveAsync(
@@ -124,16 +177,6 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
     { resolve: resolveModule, load: loadModule }
   )
 
-  /** @type {WrapperImport[]} */
-  const imports = [{
-    specifier: RUNTIME_SPECIFIER,
-    kind: 'runtime',
-    target: {
-      url: runtimeUrl,
-      format: 'commonjs'
-    },
-    external: false
-  }]
   const moduleSpecifiers = new Map()
 
   /**
@@ -148,11 +191,9 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
       imports.push({
         specifier,
         kind: 'module',
-        target: {
-          url,
-          format: formats.get(url)
-        },
-        external: url.startsWith('node:') || builtinModules.includes(url)
+        url,
+        format: formats.get(url),
+        target: targets.get(url)
       })
     }
     return specifier
@@ -162,12 +203,14 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
     realUrl: moduleData.url,
     bindings,
     originalSpecifier: moduleData.specifier,
+    data: moduleData.data,
     runtimeSpecifier: RUNTIME_SPECIFIER,
     mapImport
   })
 
   return {
     code,
+    format: 'module',
     imports,
     watchFiles: Array.from(watchFiles),
     sideEffects: true

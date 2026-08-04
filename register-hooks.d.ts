@@ -3,10 +3,19 @@
  * `file:` URLs or regular expressions, matched against the module being
  * resolved. CJS source stripping remains enabled unless explicitly disabled.
  */
-export type RegisterHooksOptions = {
+export type ModuleInclusion<Data> = {
+  data?: Data
+}
+
+export type RegisterHooksOptions<Data = unknown> = {
   include?: Array<string | RegExp>
   exclude?: Array<string | RegExp>
   disableCjsSourceStripping?: boolean
+  commonjs?: boolean
+  shouldInclude?: (
+    url: string,
+    specifier: string
+  ) => boolean | ModuleInclusion<Data>
 }
 
 /**
@@ -34,7 +43,7 @@ export type RegisterHooksOptions = {
  *
  * @throws If {@link supportsSyncHooks} is `false` in the running Node.js.
  */
-export declare function register(options?: RegisterHooksOptions): void
+export declare function register<Data = unknown>(options?: RegisterHooksOptions<Data>): void
 
 /**
  * Whether the running Node.js can correctly run the synchronous loader via

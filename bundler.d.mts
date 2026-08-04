@@ -4,11 +4,25 @@
 
 export type WrapperSource = string | ArrayBuffer | ArrayBufferView
 
-export type BundlerModule = {
+export type JsonValue =
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
+export type ModuleTarget = {
+  url: string
+  format?: string
+}
+
+export type BundlerModule<Target = ModuleTarget, Data extends JsonValue = JsonValue> = {
   url: string
   format: string
   specifier: string
   source?: WrapperSource
+  target?: Target
+  data?: Data
 }
 
 export type ModuleContext = {
@@ -16,12 +30,10 @@ export type ModuleContext = {
   parentURL?: string
 }
 
-export type ModuleTarget = {
+export type ResolveResult<Target = ModuleTarget> = {
   url: string
   format?: string
-}
-
-export type ResolveResult = ModuleTarget & {
+  target?: Target
   watchFiles?: Iterable<string>
 }
 
@@ -31,30 +43,38 @@ export type LoadResult = {
   watchFiles?: Iterable<string>
 }
 
-export type WrapperImport = {
+export type WrapperImport<Target = ModuleTarget> = {
   specifier: string
   kind: 'module' | 'runtime'
-  target: ModuleTarget
-  external: boolean
+  url: string
+  format?: string
+  target: Target | ModuleTarget
 }
 
-export type WrapperModule = {
+export type WrapperModule<Target = ModuleTarget> = {
   code: string
-  imports: WrapperImport[]
+  format: 'module' | 'commonjs'
+  imports: WrapperImport<Target>[]
   watchFiles: string[]
   sideEffects: true
 }
 
-export type CreateWrapperModuleOptions = {
-  module: BundlerModule
+export type CreateWrapperModuleOptions<
+  Target = ModuleTarget,
+  Data extends JsonValue = JsonValue
+> = {
+  module: BundlerModule<Target, Data>
   resolve: (
     specifier: string,
     context: ModuleContext
-  ) => ResolveResult | Promise<ResolveResult>
+  ) => ResolveResult<Target> | Promise<ResolveResult<Target>>
   load: (
-    url: string,
+    target: Target | ModuleTarget,
     context: ModuleContext
   ) => LoadResult | Promise<LoadResult>
 }
 
-export declare function createWrapperModule(options: CreateWrapperModuleOptions): Promise<WrapperModule>
+export declare function createWrapperModule<
+  Target = ModuleTarget,
+  Data extends JsonValue = JsonValue
+>(options: CreateWrapperModuleOptions<Target, Data>): Promise<WrapperModule<Target>>

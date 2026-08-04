@@ -39,6 +39,9 @@ let registered = false
  * @param {Array<string|RegExp>} [options.include] Only intercept these modules.
  * @param {Array<string|RegExp>} [options.exclude] Never intercept these modules.
  * @param {boolean} [options.disableCjsSourceStripping] Leave hook-provided CJS source unchanged.
+ * @param {boolean} [options.commonjs] Intercept CommonJS through the synchronous load hook.
+ * @param {(url: string, specifier: string) => boolean | { data?: unknown }} [options.shouldInclude]
+ * Custom inclusion predicate. Returning `{ data }` passes that value to the Hook callback.
  * @returns {void}
  */
 export function register (options) {
