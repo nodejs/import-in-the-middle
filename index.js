@@ -20,8 +20,6 @@ const {
   toHookExtended
 } = require('./lib/register')
 
-const hookExtensions = new WeakMap()
-
 /**
  * Checks turbopack specifiers separately (for Next.js 16+).
  *
@@ -45,7 +43,7 @@ function isTurbopackSpecifier (specifier, baseDir) {
 function addHook (hook, extendedHook = hook) {
   importHooks.push(hook)
   toHook.forEach(([name, namespace, specifier]) => hook(name, namespace, specifier))
-  extendedHooks.push(extendedHook)
+  extendedHooks.set(hook, extendedHook)
   for (const entry of toHookExtended) {
     const namespace = entry.module === undefined ? entry.namespace : entry.module.exports
     const replacement = extendedHook(entry.name, namespace, entry.specifier, entry.data, entry.format)
@@ -53,15 +51,12 @@ function addHook (hook, extendedHook = hook) {
   }
 }
 
-function removeHook (hook, extendedHook = hook) {
+function removeHook (hook) {
   const index = importHooks.indexOf(hook)
   if (index > -1) {
     importHooks.splice(index, 1)
   }
-  const extendedIndex = extendedHooks.indexOf(extendedHook)
-  if (extendedIndex > -1) {
-    extendedHooks.splice(extendedIndex, 1)
-  }
+  extendedHooks.delete(hook)
 }
 
 function callHookFn (hookFn, namespace, name, baseDir) {
@@ -307,13 +302,11 @@ function Hook (modules, options, hookFn) {
   }
 
   const extendedHook = callExtendedHook.bind(undefined, hookFn, modules, internals)
-  hookExtensions.set(this, extendedHook)
   addHook(this._iitmHook, extendedHook)
 }
 
 Hook.prototype.unhook = function () {
-  removeHook(this._iitmHook, hookExtensions.get(this))
-  hookExtensions.delete(this)
+  removeHook(this._iitmHook)
 }
 
 module.exports = Hook
