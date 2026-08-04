@@ -52,9 +52,11 @@ doesNotMatch(wrapper.code, /from "file:/)
  * @param {string} name
  * @param {string|undefined} baseDir
  * @param {object} data
+ * @param {string} format
  */
-function hookFoo (exported, name, baseDir, data) {
+function hookFoo (exported, name, baseDir, data, format) {
   deepStrictEqual(data, { version: '1.0.0' })
+  strictEqual(format, 'module')
   exported.foo = 43
   return () => 44
 }
@@ -183,10 +185,19 @@ await rejects(createWrapperModule({
   message: `The bundler load adapter returned no source for '${commonJsUrl}'`
 })
 
-const commonJsHook = new Hook(['./something.js'], (exports, name, baseDir, data) => {
+/**
+ * @param {object} exports
+ * @param {string} name
+ * @param {string|undefined} baseDir
+ * @param {object} data
+ * @param {string} format
+ */
+const commonJsHookFn = (exports, name, baseDir, data, format) => {
   deepStrictEqual(data, { version: '1.0.0' })
+  strictEqual(format, 'commonjs')
   return { ...exports, hooked: true }
-})
+}
+const commonJsHook = new Hook(['./something.js'], commonJsHookFn)
 let unfilteredCalls = 0
 const unfilteredHook = new Hook((exports, name, baseDir, data) => {
   if (data?.version === '1.0.0') unfilteredCalls++

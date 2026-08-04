@@ -86,7 +86,7 @@ function callHookFn (hookFn, namespace, name, baseDir) {
  * @returns {unknown}
  */
 function callExtendedHookFn (hookFn, namespace, name, baseDir, data, format) {
-  const replacement = hookFn(namespace, name, baseDir, data)
+  const replacement = hookFn(namespace, name, baseDir, data, format)
   if (format === 'commonjs') return replacement
   if (replacement && replacement !== namespace && 'default' in namespace) {
     namespace.default = replacement

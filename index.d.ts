@@ -19,6 +19,7 @@ export type Namespace = { [key: string]: any }
  * @param {baseDir} string The absolute path of the module, if not provided in
  * `name`.
  * @param {data} Data Optional metadata embedded by a bundler.
+ * @param {format} string The intercepted module format, when available.
  * @return any A value that can will be assigned to `exports.default`. This is
  * equivalent to doing that assignment in the body of this function. For
  * CommonJS modules, the value replaces `module.exports`.
@@ -27,7 +28,8 @@ export type HookFn<Data = unknown> = (
   exported: Namespace,
   name: string,
   baseDir: string|void,
-  data?: Data
+  data?: Data,
+  format?: 'module'|'commonjs'
 ) => any
 
 export type Options = {
