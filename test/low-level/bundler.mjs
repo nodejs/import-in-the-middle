@@ -13,7 +13,7 @@ const {
   createWrapperModule: createCommonJSWrapperModule,
   getNodeModuleFormat
 } = require('../../bundler.js')
-const { registerWithData } = require('../../lib/bundler-runtime.js')
+const { registerCommonJS, registerWithData } = require('../../lib/bundler-runtime.js')
 const moduleUrl = new URL('../fixtures/something.mjs', import.meta.url).href
 const source = await readFile(new URL(moduleUrl), 'utf8')
 
@@ -283,6 +283,23 @@ const packageInternalHook = new Hook(['some-external-module'], { internals: true
 registerWithData(packageInternalUrl, {}, {}, {}, 'some-external-module/sub', undefined)
 strictEqual(packageInternalName, join('some-external-module', 'sub.mjs'))
 packageInternalHook.unhook()
+
+let commonJsPackageName
+const commonJsPackageHook = new Hook(['some-external-module'], (exports, name) => {
+  commonJsPackageName = name
+})
+commonJsPackageName = undefined
+registerCommonJS(hookedPackageUrl, { exports: {} }, 'some-external-module', undefined)
+strictEqual(commonJsPackageName, 'some-external-module')
+commonJsPackageName = undefined
+registerCommonJS(
+  new URL('../fixtures/node_modules/some-external-module/sub.js', import.meta.url).href,
+  { exports: {} },
+  './sub',
+  undefined
+)
+strictEqual(commonJsPackageName, join('some-external-module', 'sub.js'))
+commonJsPackageHook.unhook()
 
 let invalidFileUrlName
 const invalidFileUrlHook = new Hook((exports, name) => {
