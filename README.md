@@ -129,6 +129,15 @@ const wrapper = await createWrapperModule({
 })
 ```
 
+CommonJS integrations can use the lazy-loading facade. It also exposes the
+module format detection used by the Node loader:
+
+```js
+const { createWrapperModule, getNodeModuleFormat } = require('import-in-the-middle/bundler')
+
+const format = getNodeModuleFormat(url, packageJsonUrl, packageJson.type)
+```
+
 `url` is the canonical `file:` or `node:` URL reported to hooks. `resolve` and
 `load` adapt the bundler's resolver and source loader to the same URL-based
 module graph.

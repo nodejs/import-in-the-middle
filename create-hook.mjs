@@ -5,6 +5,7 @@
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules } from 'module'
+import getNodeModuleFormat from './lib/get-node-module-format.js'
 import { driveSync, driveAsync } from './lib/io.mjs'
 import { buildCommonJSWrapperSource, buildWrapperSource, processModule } from './lib/wrapper.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
@@ -25,7 +26,6 @@ const HANDLED_FORMATS = new Set([
   'builtin', 'module', 'commonjs', 'module-typescript', 'commonjs-typescript'
 ])
 const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
-let packageTypes
 
 /** @typedef {import('node:module').LoadHookContext} LoadContext */
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
@@ -146,66 +146,6 @@ function addIitm (url) {
   const urlObj = new URL(url)
   urlObj.searchParams.set('iitm', 'true')
   return urlObj.href
-}
-
-/**
- * @param {'.js'|'.ts'} extension
- * @param {string|undefined} type
- * @returns {'module'|'module-typescript'|'commonjs'|'commonjs-typescript'}
- */
-function getPackageFormat (extension, type) {
-  if (type === 'module') return extension === '.ts' ? 'module-typescript' : 'module'
-  return extension === '.ts' ? 'commonjs-typescript' : 'commonjs'
-}
-
-/**
- * @param {string} url
- * @returns {string|undefined}
- */
-function getFileFormat (url) {
-  if (!url.startsWith('file:')) return undefined
-  const pathname = new URL(url).pathname
-  let extension
-  if (pathname.endsWith('.mjs')) extension = '.mjs'
-  else if (pathname.endsWith('.cjs')) extension = '.cjs'
-  else if (pathname.endsWith('.mts')) extension = '.mts'
-  else if (pathname.endsWith('.cts')) extension = '.cts'
-  else if (pathname.endsWith('.js')) extension = '.js'
-  else if (pathname.endsWith('.ts')) extension = '.ts'
-  else return undefined
-
-  if (extension === '.mjs') return 'module'
-  if (extension === '.cjs') return 'commonjs'
-  if (extension === '.mts') return 'module-typescript'
-  if (extension === '.cts') return 'commonjs-typescript'
-
-  packageTypes ??= new Map()
-  const visited = []
-  let directory = new URL('.', url)
-  while (true) {
-    if (packageTypes.has(directory.href)) {
-      const type = packageTypes.get(directory.href)
-      for (const href of visited) packageTypes.set(href, type)
-      return getPackageFormat(extension, type)
-    }
-
-    visited.push(directory.href)
-    try {
-      const source = process.getBuiltinModule('fs').readFileSync(new URL('package.json', directory), 'utf8')
-      const type = JSON.parse(source).type
-      packageTypes.set(directory.href, type)
-      continue
-    } catch (error) {
-      if (error.code !== 'ENOENT') return undefined
-    }
-
-    const parent = new URL('../', directory)
-    if (parent.href === directory.href) {
-      for (const href of visited) packageTypes.set(href, undefined)
-      return getPackageFormat(extension, undefined)
-    }
-    directory = parent
-  }
 }
 
 /**
@@ -442,7 +382,7 @@ export function createHook (meta, commonjs) {
         }
       }
 
-      const format = result.format ?? (result.url.startsWith('node:') ? 'builtin' : getFileFormat(result.url))
+      const format = result.format ?? getNodeModuleFormat(result.url)
       if (format === 'module' || format === 'module-typescript') {
         const specifierData = format === 'module-typescript' ? { specifier, format } : specifier
         specifiers.set(result.url, specifierData)

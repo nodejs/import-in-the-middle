@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 
+import { getNodeModuleFormat } from '../../bundler.js'
 import { createWrapperModule } from '../../bundler.mjs'
 
 const moduleUrl = new URL('../fixtures/something.mjs', import.meta.url).href
@@ -21,3 +22,4 @@ const wrapper = await createWrapperModule({
 
 assert.equal(wrapper.sideEffects, true)
 assert.equal(wrapper.imports[0].kind, 'runtime')
+assert.equal(getNodeModuleFormat(moduleUrl), 'module')

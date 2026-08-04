@@ -1,5 +1,5 @@
 import { strictEqual, deepStrictEqual, match, doesNotMatch, rejects } from 'assert'
-import { readFile, mkdtemp, writeFile, rm } from 'fs/promises'
+import { readFile, mkdir, mkdtemp, writeFile, rm } from 'fs/promises'
 import { createRequire } from 'module'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -9,6 +9,10 @@ import Hook from '../../index.js'
 import { createWrapperModule } from '../../bundler.mjs'
 
 const require = createRequire(import.meta.url)
+const {
+  createWrapperModule: createCommonJSWrapperModule,
+  getNodeModuleFormat
+} = require('../../bundler.js')
 const { registerWithData } = require('../../lib/bundler-runtime.js')
 const moduleUrl = new URL('../fixtures/something.mjs', import.meta.url).href
 const source = await readFile(new URL(moduleUrl), 'utf8')
@@ -20,7 +24,7 @@ function unexpectedIo () {
   throw new Error('I/O should not be used when source is provided')
 }
 
-const wrapper = await createWrapperModule({
+const wrapper = await createCommonJSWrapperModule({
   module: {
     url: moduleUrl,
     format: 'module',
@@ -46,6 +50,34 @@ match(wrapper.code, /from "\.\/__iitm_module_0__\.js"/)
 match(wrapper.code, /\nregisterWithData\(/)
 match(wrapper.code, /\{"version":"1\.0\.0"\}\)/)
 doesNotMatch(wrapper.code, /from "file:/)
+
+const formatDirectory = await mkdtemp(join(tmpdir(), 'iitm-bundler-format-'))
+try {
+  const packageJsonUrl = pathToFileURL(join(formatDirectory, 'package.json')).href
+  strictEqual(
+    getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'seeded.js')).href, packageJsonUrl, 'module'),
+    'module'
+  )
+  await writeFile(join(formatDirectory, 'package.json'), '{"type":"module"}')
+  const nestedDirectory = join(formatDirectory, 'nested')
+  await mkdir(nestedDirectory)
+  await writeFile(join(nestedDirectory, 'package.json'), '{"type":"commonjs"}')
+  strictEqual(
+    getNodeModuleFormat(pathToFileURL(join(nestedDirectory, 'module.js')).href, packageJsonUrl, 'module'),
+    'commonjs'
+  )
+  strictEqual(getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'module.js')).href), 'module')
+  strictEqual(getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'module.ts')).href), 'module-typescript')
+  strictEqual(getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'module.mjs')).href), 'module')
+  strictEqual(getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'module.cjs')).href), 'commonjs')
+  strictEqual(getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'module.mts')).href), 'module-typescript')
+  strictEqual(getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'module.cts')).href), 'commonjs-typescript')
+} finally {
+  await rm(formatDirectory, { recursive: true, force: true })
+}
+
+strictEqual(getNodeModuleFormat('node:fs'), 'builtin')
+strictEqual(getNodeModuleFormat(moduleUrl.replace(/\.mjs$/, '.json')), undefined)
 
 /**
  * @param {object} exported
