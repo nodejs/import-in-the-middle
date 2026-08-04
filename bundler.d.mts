@@ -1,27 +1,18 @@
-// Unless explicitly stated otherwise all files in this repository are licensed under the Apache 2.0 License.
-//
-// This product includes software developed at Datadog (https://www.datadoghq.com/). Copyright 2021 Datadog, Inc.
-
 export type WrapperSource = string | ArrayBuffer | ArrayBufferView
 
 export type JsonValue =
   | boolean
+  | null
   | number
   | string
   | JsonValue[]
   | { [key: string]: JsonValue }
 
-export type ModuleTarget = {
-  url: string
-  format?: string
-}
-
-export type BundlerModule<Target = ModuleTarget, Data extends JsonValue = JsonValue> = {
+export type BundlerModule<Data extends JsonValue = JsonValue> = {
   url: string
   format: string
   specifier: string
   source?: WrapperSource
-  target?: Target
   data?: Data
 }
 
@@ -30,10 +21,12 @@ export type ModuleContext = {
   parentURL?: string
 }
 
-export type ResolveResult<Target = ModuleTarget> = {
+export type ModuleTarget = {
   url: string
   format?: string
-  target?: Target
+}
+
+export type ResolveResult = ModuleTarget & {
   watchFiles?: Iterable<string>
 }
 
@@ -43,38 +36,32 @@ export type LoadResult = {
   watchFiles?: Iterable<string>
 }
 
-export type WrapperImport<Target = ModuleTarget> = {
+export type WrapperImport = {
   specifier: string
   kind: 'module' | 'runtime'
-  url: string
-  format?: string
-  target: Target | ModuleTarget
+  target: ModuleTarget
+  external: boolean
 }
 
-export type WrapperModule<Target = ModuleTarget> = {
+export type WrapperModule = {
   code: string
-  format: 'module' | 'commonjs'
-  imports: WrapperImport<Target>[]
+  imports: WrapperImport[]
   watchFiles: string[]
   sideEffects: true
 }
 
-export type CreateWrapperModuleOptions<
-  Target = ModuleTarget,
-  Data extends JsonValue = JsonValue
-> = {
-  module: BundlerModule<Target, Data>
+export type CreateWrapperModuleOptions<Data extends JsonValue = JsonValue> = {
+  module: BundlerModule<Data>
   resolve: (
     specifier: string,
     context: ModuleContext
-  ) => ResolveResult<Target> | Promise<ResolveResult<Target>>
+  ) => ResolveResult | Promise<ResolveResult>
   load: (
-    target: Target | ModuleTarget,
+    url: string,
     context: ModuleContext
   ) => LoadResult | Promise<LoadResult>
 }
 
-export declare function createWrapperModule<
-  Target = ModuleTarget,
-  Data extends JsonValue = JsonValue
->(options: CreateWrapperModuleOptions<Target, Data>): Promise<WrapperModule<Target>>
+export declare function createWrapperModule<Data extends JsonValue = JsonValue>(
+  options: CreateWrapperModuleOptions<Data>
+): Promise<WrapperModule>

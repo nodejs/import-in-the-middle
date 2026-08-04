@@ -24,7 +24,6 @@ try {
     'lib/get-exports.mjs',
     'lib/io.mjs',
     'lib/register.js',
-    'lib/source.mjs',
     'lib/wrapper.mjs'
   ]
   const setupPromises = []

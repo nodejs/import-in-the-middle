@@ -1,5 +1,6 @@
 import { strictEqual, deepStrictEqual, match, doesNotMatch, rejects } from 'assert'
 import { readFile, mkdtemp, writeFile, rm } from 'fs/promises'
+import { createRequire } from 'module'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
@@ -7,6 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'url'
 import Hook from '../../index.js'
 import { createWrapperModule } from '../../bundler.mjs'
 
+const require = createRequire(import.meta.url)
+const { registerWithData } = require('../../lib/bundler-runtime.js')
 const moduleUrl = new URL('../fixtures/something.mjs', import.meta.url).href
 const source = await readFile(new URL(moduleUrl), 'utf8')
 
@@ -22,32 +25,38 @@ const wrapper = await createWrapperModule({
     url: moduleUrl,
     format: 'module',
     source,
-    specifier: './something.mjs'
+    specifier: './something.mjs',
+    data: { version: '1.0.0' }
   },
   resolve: unexpectedIo,
   load: unexpectedIo
 })
 
 strictEqual(wrapper.sideEffects, true)
-strictEqual(wrapper.format, 'module')
 deepStrictEqual(wrapper.watchFiles, [moduleUrl])
 strictEqual(wrapper.imports.length, 2)
 strictEqual(wrapper.imports[0].specifier, './__iitm_runtime__.js')
 strictEqual(wrapper.imports[0].kind, 'runtime')
-strictEqual(wrapper.imports[0].format, 'commonjs')
+strictEqual(wrapper.imports[0].external, false)
 strictEqual(wrapper.imports[1].specifier, './__iitm_module_0__.js')
 strictEqual(wrapper.imports[1].kind, 'module')
-strictEqual(wrapper.imports[1].url, moduleUrl)
+strictEqual(wrapper.imports[1].external, false)
 match(wrapper.code, /from "\.\/__iitm_runtime__\.js"/)
 match(wrapper.code, /from "\.\/__iitm_module_0__\.js"/)
-match(wrapper.code, /__binder\.register\(\)/)
+match(wrapper.code, /\nregisterWithData\(/)
+match(wrapper.code, /\{"version":"1\.0\.0"\}\)/)
 doesNotMatch(wrapper.code, /from "file:/)
 
 /**
  * @param {object} exported
+ * @param {string} name
+ * @param {string|undefined} baseDir
+ * @param {object} data
  */
-function hookFoo (exported) {
+function hookFoo (exported, name, baseDir, data) {
+  deepStrictEqual(data, { version: '1.0.0' })
   exported.foo = 43
+  return () => 44
 }
 
 const hook = new Hook(['./something.mjs'], hookFoo)
@@ -61,6 +70,7 @@ try {
   await writeFile(new URL(wrapperUrl), executableCode)
   const wrappedNamespace = await import(wrapperUrl)
   strictEqual(wrappedNamespace.foo, 43)
+  strictEqual(wrappedNamespace.default(), 44)
 } finally {
   hook.unhook()
   await rm(temporaryDirectory, { recursive: true, force: true })
@@ -78,13 +88,15 @@ const rebuilt = await createWrapperModule({
 })
 
 match(rebuilt.code, /export \{ \$rebuilt as "rebuilt" \}/)
+match(rebuilt.code, /\nregister\(/)
+doesNotMatch(rebuilt.code, /registerWithData/)
 doesNotMatch(rebuilt.code, /\$foo/)
 
 /**
- * @param {{ url: string }} target
+ * @param {string} url
  */
-function loadBuiltin (target) {
-  strictEqual(target.url, 'node:dns/promises')
+function loadBuiltin (url) {
+  strictEqual(url, 'node:dns/promises')
   return { format: 'builtin' }
 }
 
@@ -98,7 +110,7 @@ const builtinWrapper = await createWrapperModule({
   load: loadBuiltin
 })
 
-strictEqual(builtinWrapper.imports[1].format, 'builtin')
+strictEqual(builtinWrapper.imports[1].external, true)
 strictEqual(builtinWrapper.imports[1].target.url, 'node:dns/promises')
 doesNotMatch(builtinWrapper.code, /from "node:dns\/promises"/)
 
@@ -107,62 +119,93 @@ const commonJsWrapper = await createWrapperModule({
   module: {
     url: commonJsUrl,
     format: 'commonjs',
-    source: await readFile(new URL(commonJsUrl), 'utf8'),
+    source: '#!/usr/bin/env node\nmodule.exports = { value: 42 }\nreturn\nmodule.exports.unreachable = true',
     specifier: './something.js',
-    target: { namespace: 'file', path: fileURLToPath(commonJsUrl) },
-    data: { package: 'fixture', version: '1.0.0' }
+    data: { version: '1.0.0' }
   },
   resolve: unexpectedIo,
   load: unexpectedIo
 })
 
-strictEqual(commonJsWrapper.format, 'commonjs')
 strictEqual(commonJsWrapper.imports.length, 1)
 strictEqual(commonJsWrapper.imports[0].kind, 'runtime')
 match(commonJsWrapper.code, /registerCommonJS/)
-match(commonJsWrapper.code, /"package":"fixture","version":"1\.0\.0"/)
 doesNotMatch(commonJsWrapper.code, /^(?:import|export) /m)
 
-const loadedCommonJsTarget = { namespace: 'file', path: '/virtual/loaded.cjs' }
 const loadedCommonJsWrapper = await createWrapperModule({
   module: {
-    url: 'file:///virtual/loaded.cjs',
+    url: commonJsUrl,
     format: 'commonjs',
-    specifier: './loaded.cjs',
-    target: loadedCommonJsTarget
+    specifier: './something.js'
   },
   resolve: unexpectedIo,
-  load (target) {
-    strictEqual(target, loadedCommonJsTarget)
-    return { source: 'module.exports = 42' }
-  }
+  load: async () => ({ source: Buffer.from('module.exports = 42') })
 })
 
-strictEqual(loadedCommonJsWrapper.format, 'commonjs')
 match(loadedCommonJsWrapper.code, /module\.exports = 42/)
 
-await rejects(createWrapperModule({
+const typedArrayCommonJsWrapper = await createWrapperModule({
   module: {
-    url: 'file:///virtual/missing-source.cjs',
+    url: commonJsUrl,
     format: 'commonjs',
-    specifier: './missing-source.cjs'
-  },
-  resolve: unexpectedIo,
-  load () {
-    return {}
-  }
-}), /returned no source/)
-
-await rejects(createWrapperModule({
-  module: {
-    url: 'file:///virtual/data.json',
-    format: 'json',
-    source: '{}',
-    specifier: './data.json'
+    source: new TextEncoder().encode('module.exports = 43'),
+    specifier: './something.js'
   },
   resolve: unexpectedIo,
   load: unexpectedIo
-}), /Unsupported module format 'json'/)
+})
+
+match(typedArrayCommonJsWrapper.code, /module\.exports = 43/)
+
+const arrayBufferCommonJsWrapper = await createWrapperModule({
+  module: {
+    url: commonJsUrl,
+    format: 'commonjs',
+    source: new TextEncoder().encode('module.exports = 44').buffer,
+    specifier: './something.js'
+  },
+  resolve: unexpectedIo,
+  load: unexpectedIo
+})
+
+match(arrayBufferCommonJsWrapper.code, /module\.exports = 44/)
+
+await rejects(createWrapperModule({
+  module: {
+    url: commonJsUrl,
+    format: 'commonjs',
+    specifier: './something.js'
+  },
+  resolve: unexpectedIo,
+  load: async () => ({})
+}), {
+  name: 'TypeError',
+  message: `The bundler load adapter returned no source for '${commonJsUrl}'`
+})
+
+const commonJsHook = new Hook(['./something.js'], (exports, name, baseDir, data) => {
+  deepStrictEqual(data, { version: '1.0.0' })
+  return { ...exports, hooked: true }
+})
+let unfilteredCalls = 0
+const unfilteredHook = new Hook((exports, name, baseDir, data) => {
+  if (data?.version === '1.0.0') unfilteredCalls++
+})
+let commonJsCode = commonJsWrapper.code
+for (const { specifier, target } of commonJsWrapper.imports) {
+  commonJsCode = commonJsCode.replaceAll(JSON.stringify(specifier), JSON.stringify(fileURLToPath(target.url)))
+}
+const commonJsDirectory = await mkdtemp(join(tmpdir(), 'iitm-bundler-commonjs-'))
+try {
+  const commonJsFilename = join(commonJsDirectory, 'wrapper.cjs')
+  await writeFile(commonJsFilename, commonJsCode)
+  deepStrictEqual(require(commonJsFilename), { value: 42, hooked: true })
+  strictEqual(unfilteredCalls, 2)
+} finally {
+  unfilteredHook.unhook()
+  commonJsHook.unhook()
+  await rm(commonJsDirectory, { recursive: true, force: true })
+}
 
 const packageUrl = new URL('../../package.json', import.meta.url).href
 const sourceWatchUrl = new URL('../fixtures/', import.meta.url).href
@@ -179,58 +222,61 @@ function resolveModule (specifier, context) {
   }
 }
 
+const hookedPackageUrl = new URL('../fixtures/node_modules/some-external-module/index.mjs', import.meta.url).href
+let packageBaseDirectory
+const packageHook = new Hook(['some-external-module'], (exports, name, baseDir, data) => {
+  packageBaseDirectory = baseDir
+  deepStrictEqual(data, { version: '2.0.0' })
+})
+registerWithData(hookedPackageUrl, {}, {}, {}, 'some-external-module', { version: '2.0.0' })
+strictEqual(packageBaseDirectory, fileURLToPath(new URL('.', hookedPackageUrl)).slice(0, -1))
+packageHook.unhook()
+
+const packageInternalUrl = new URL('../fixtures/node_modules/some-external-module/sub.mjs', import.meta.url).href
+let packageInternalName
+const packageInternalHook = new Hook(['some-external-module'], { internals: true }, (exports, name) => {
+  packageInternalName = name
+})
+registerWithData(packageInternalUrl, {}, {}, {}, 'some-external-module/sub', undefined)
+strictEqual(packageInternalName, join('some-external-module', 'sub.mjs'))
+packageInternalHook.unhook()
+
+let invalidFileUrlName
+const invalidFileUrlHook = new Hook((exports, name) => {
+  invalidFileUrlName = name
+})
+invalidFileUrlName = undefined
+registerWithData('file://%', {}, {}, {}, 'invalid', undefined)
+strictEqual(invalidFileUrlName, 'file://%')
+invalidFileUrlHook.unhook()
+
 /**
- * @param {{ url: string }} target
+ * @param {string} url
  * @param {{ format: string }} context
  */
-async function loadModule (target, context) {
+async function loadModule (url, context) {
   return {
-    source: await readFile(new URL(target.url), 'utf8'),
+    source: await readFile(new URL(url), 'utf8'),
     format: context.format,
     watchFiles: [sourceWatchUrl]
   }
 }
 
 const reexportUrl = new URL('../fixtures/reexport-same-source.mjs', import.meta.url).href
-const reexportTarget = {
-  namespace: 'file',
-  path: fileURLToPath(reexportUrl),
-  pluginData: { loader: 'source' }
-}
-const leafTargets = new Map()
 const reexportWrapper = await createWrapperModule({
   module: {
     url: reexportUrl,
     format: 'module',
-    specifier: './reexport-same-source.mjs',
-    target: reexportTarget
+    specifier: './reexport-same-source.mjs'
   },
-  resolve (specifier, context) {
-    const result = resolveModule(specifier, context)
-    const target = {
-      namespace: 'file',
-      path: fileURLToPath(result.url),
-      pluginData: { resolvedBy: 'fixture' }
-    }
-    leafTargets.set(result.url, target)
-    return { ...result, target }
-  },
-  async load (target, context) {
-    if (target === reexportTarget) {
-      return loadModule({ url: reexportUrl }, context)
-    }
-    for (const [url, leafTarget] of leafTargets) {
-      if (target === leafTarget) return loadModule({ url }, context)
-    }
-    throw new Error('load received a target that was not returned by the adapter')
-  }
+  resolve: resolveModule,
+  load: loadModule
 })
 
-strictEqual(reexportWrapper.format, 'module')
 strictEqual(reexportWrapper.imports[0].kind, 'runtime')
-strictEqual(reexportWrapper.imports[1].target, reexportTarget)
+strictEqual(reexportWrapper.imports[1].target.url, reexportUrl)
 strictEqual(reexportWrapper.imports[2].specifier, './__iitm_module_1__.js')
-strictEqual(reexportWrapper.imports[2].target, leafTargets.get(reexportWrapper.imports[2].url))
+strictEqual(reexportWrapper.imports[2].target.format, 'module')
 strictEqual(reexportWrapper.watchFiles.includes(reexportUrl), true)
 strictEqual(reexportWrapper.watchFiles.includes(packageUrl), true)
 strictEqual(reexportWrapper.watchFiles.includes(sourceWatchUrl), true)

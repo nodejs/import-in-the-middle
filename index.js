@@ -13,10 +13,14 @@ if (!isBuiltin) {
 }
 
 const {
-  addHook,
-  removeHook,
-  specifiers
+  extendedHooks,
+  importHooks,
+  specifiers,
+  toHook,
+  toHookExtended
 } = require('./lib/register')
+
+const hookExtensions = new WeakMap()
 
 /**
  * Checks turbopack specifiers separately (for Next.js 16+).
@@ -38,18 +42,30 @@ function isTurbopackSpecifier (specifier, baseDir) {
   return baseDir.endsWith(specifierWithoutTurbopackHash)
 }
 
-/**
- * @param {Function} hookFn
- * @param {object} namespace
- * @param {string} name
- * @param {string|undefined} baseDir
- * @param {unknown} data
- * @param {'module'|'commonjs'} format
- * @returns {unknown}
- */
-function callHookFn (hookFn, namespace, name, baseDir, data, format) {
-  const newDefault = hookFn(namespace, name, baseDir, data)
-  if (format === 'commonjs') return newDefault
+function addHook (hook, extendedHook = hook) {
+  importHooks.push(hook)
+  toHook.forEach(([name, namespace, specifier]) => hook(name, namespace, specifier))
+  extendedHooks.push(extendedHook)
+  for (const entry of toHookExtended) {
+    const namespace = entry.module === undefined ? entry.namespace : entry.module.exports
+    const replacement = extendedHook(entry.name, namespace, entry.specifier, entry.data, entry.format)
+    if (entry.module !== undefined && replacement !== undefined) entry.module.exports = replacement
+  }
+}
+
+function removeHook (hook, extendedHook = hook) {
+  const index = importHooks.indexOf(hook)
+  if (index > -1) {
+    importHooks.splice(index, 1)
+  }
+  const extendedIndex = extendedHooks.indexOf(extendedHook)
+  if (extendedIndex > -1) {
+    extendedHooks.splice(extendedIndex, 1)
+  }
+}
+
+function callHookFn (hookFn, namespace, name, baseDir) {
+  const newDefault = hookFn(namespace, name, baseDir)
   if (newDefault && newDefault !== namespace) {
     // Only ESM modules that actually export `default` can have it reassigned.
     // Some hooks return a value unconditionally; avoid crashing when the module
@@ -58,6 +74,91 @@ function callHookFn (hookFn, namespace, name, baseDir, data, format) {
       namespace.default = newDefault
     }
   }
+}
+
+/**
+ * @param {(namespace: unknown, name: string, baseDir: string|undefined, data: unknown) => unknown} hookFn
+ * @param {unknown} namespace
+ * @param {string} name
+ * @param {string|undefined} baseDir
+ * @param {unknown} data
+ * @param {'module'|'commonjs'} format
+ * @returns {unknown}
+ */
+function callExtendedHookFn (hookFn, namespace, name, baseDir, data, format) {
+  const replacement = hookFn(namespace, name, baseDir, data)
+  if (format === 'commonjs') return replacement
+  if (replacement && replacement !== namespace && 'default' in namespace) {
+    namespace.default = replacement
+  }
+}
+
+/**
+ * @param {(namespace: unknown, name: string, baseDir: string|undefined, data: unknown) => unknown} hookFn
+ * @param {Array<string>|null} modules
+ * @param {boolean} internals
+ * @param {string} name
+ * @param {unknown} namespace
+ * @param {string} specifier
+ * @param {unknown} data
+ * @param {'module'|'commonjs'} format
+ * @returns {unknown}
+ */
+function callExtendedHook (hookFn, modules, internals, name, namespace, specifier, data, format) {
+  const loadUrl = name
+  const isNodeUrl = loadUrl.startsWith('node:')
+  let filePath, baseDir
+
+  if (isNodeUrl) {
+    const unprefixed = name.slice(5)
+    if (isBuiltin(unprefixed)) {
+      name = unprefixed
+    }
+  } else if (loadUrl.startsWith('file://')) {
+    const stackTraceLimit = Error.stackTraceLimit
+    Error.stackTraceLimit = 0
+    try {
+      filePath = fileURLToPath(name)
+      name = filePath
+    } catch {}
+    Error.stackTraceLimit = stackTraceLimit
+
+    if (filePath) {
+      const details = moduleDetailsFromPath(filePath)
+      if (details) {
+        name = details.name
+        baseDir = details.basedir
+      }
+    }
+  }
+
+  let replacement
+  if (modules) {
+    for (const matchArg of modules) {
+      let result
+      if (filePath && matchArg === filePath) {
+        result = callExtendedHookFn(hookFn, namespace, filePath, undefined, data, format)
+      } else if (matchArg === name) {
+        if (!baseDir) {
+          result = callExtendedHookFn(hookFn, namespace, name, baseDir, data, format)
+        } else if (baseDir.endsWith(specifiers.get(loadUrl)) || isTurbopackSpecifier(specifiers.get(loadUrl), baseDir)) {
+          result = callExtendedHookFn(hookFn, namespace, name, baseDir, data, format)
+        } else if (internals) {
+          const internalPath = name + path.sep + path.relative(baseDir, filePath)
+          result = callExtendedHookFn(hookFn, namespace, internalPath, baseDir, data, format)
+        }
+      } else if (matchArg === specifier) {
+        result = callExtendedHookFn(hookFn, namespace, specifier, baseDir, data, format)
+      }
+      if (format === 'commonjs' && result !== undefined) {
+        namespace = result
+        replacement = result
+      }
+    }
+    return replacement
+  }
+
+  return callExtendedHookFn(hookFn, namespace, name, baseDir, data, format)
 }
 
 let sendModulesToLoader
@@ -145,7 +246,7 @@ function Hook (modules, options, hookFn) {
     sendModulesToLoader(modules)
   }
 
-  this._iitmHook = (name, namespace, specifier, data, format) => {
+  this._iitmHook = (name, namespace, specifier) => {
     const loadUrl = name
     const isNodeUrl = loadUrl.startsWith('node:')
     let filePath, baseDir
@@ -176,47 +277,43 @@ function Hook (modules, options, hookFn) {
       }
     }
 
-    let replacement
     if (modules) {
       for (const matchArg of modules) {
-        let result
         if (filePath && matchArg === filePath) {
           // abspath match
-          result = callHookFn(hookFn, namespace, filePath, undefined, data, format)
+          callHookFn(hookFn, namespace, filePath, undefined)
         } else if (matchArg === name) {
           if (!baseDir) {
             // built-in module (or unexpected non file:// name?)
-            result = callHookFn(hookFn, namespace, name, baseDir, data, format)
+            callHookFn(hookFn, namespace, name, baseDir)
           } else if (baseDir.endsWith(specifiers.get(loadUrl)) || isTurbopackSpecifier(specifiers.get(loadUrl), baseDir)) {
             // An import of the top-level module (e.g. `import 'ioredis'`).
             // Note: Slight behaviour difference from RITM. RITM uses
             // `require.resolve(name)` to see if filename is the module
             // main file, which will catch `require('ioredis/built/index.js')`.
             // The check here will not catch `import 'ioredis/built/index.js'`.
-            result = callHookFn(hookFn, namespace, name, baseDir, data, format)
+            callHookFn(hookFn, namespace, name, baseDir)
           } else if (internals) {
             const internalPath = name + path.sep + path.relative(baseDir, filePath)
-            result = callHookFn(hookFn, namespace, internalPath, baseDir, data, format)
+            callHookFn(hookFn, namespace, internalPath, baseDir)
           }
         } else if (matchArg === specifier) {
-          result = callHookFn(hookFn, namespace, specifier, baseDir, data, format)
-        }
-        if (result !== undefined) {
-          namespace = result
-          replacement = result
+          callHookFn(hookFn, namespace, specifier, baseDir)
         }
       }
-      return replacement
     } else {
-      return callHookFn(hookFn, namespace, name, baseDir, data, format)
+      callHookFn(hookFn, namespace, name, baseDir)
     }
   }
 
-  addHook(this._iitmHook)
+  const extendedHook = callExtendedHook.bind(undefined, hookFn, modules, internals)
+  hookExtensions.set(this, extendedHook)
+  addHook(this._iitmHook, extendedHook)
 }
 
 Hook.prototype.unhook = function () {
-  removeHook(this._iitmHook)
+  removeHook(this._iitmHook, hookExtensions.get(this))
+  hookExtensions.delete(this)
 }
 
 module.exports = Hook

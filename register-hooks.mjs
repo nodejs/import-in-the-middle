@@ -1,4 +1,5 @@
 import * as module from 'module'
+import { createRequire } from 'module'
 import { createHook } from './create-hook.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 
@@ -39,9 +40,7 @@ let registered = false
  * @param {Array<string|RegExp>} [options.include] Only intercept these modules.
  * @param {Array<string|RegExp>} [options.exclude] Never intercept these modules.
  * @param {boolean} [options.disableCjsSourceStripping] Leave hook-provided CJS source unchanged.
- * @param {boolean} [options.commonjs] Intercept CommonJS through the synchronous load hook.
- * @param {(url: string, specifier: string) => boolean | { data?: unknown }} [options.shouldInclude]
- * Custom inclusion predicate. Returning `{ data }` passes that value to the Hook callback.
+ * @param {boolean} [options.commonjs] Intercept CommonJS modules.
  * @returns {void}
  */
 export function register (options) {
@@ -60,8 +59,17 @@ export function register (options) {
   }
   registered = true
 
+  const commonjs = options?.commonjs === true
+  const activeHook = commonjs ? createHook(import.meta, true) : hook
   if (options) {
-    hook.applyOptions(options)
+    activeHook.applyOptions(options)
+  }
+
+  if (commonjs) {
+    const require = createRequire(import.meta.url)
+    require('./lib/register.js')
+    module.registerHooks({ resolve: activeHook.resolveSyncCommonJS, load: activeHook.loadSyncCommonJS })
+    return
   }
 
   module.registerHooks({ resolve: hook.resolveSync, load: hook.loadSync })

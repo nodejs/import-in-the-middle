@@ -6,15 +6,14 @@ let source = readFileSync(createHookUrl, 'utf8')
 
 /**
  * @param {string} _match
- * @param {string} prefix
  * @param {string} relative
  */
-function resolveImport (_match, prefix, relative) {
+function resolveImport (_match, relative) {
   const absolute = new URL('../../' + relative.slice(2), import.meta.url).href
-  return prefix + JSON.stringify(absolute)
+  return `from ${JSON.stringify(absolute)}`
 }
 
-source = source.replace(/(from |import )'(\.\/[^']+)'/g, resolveImport)
+source = source.replace(/from '(\.\/[^']+)'/g, resolveImport)
 source = source.replace(
   'return { initialize, load, resolve, resolveSync, loadSync, applyOptions }',
   'return { initialize, load, resolve, resolveSync, loadSync, applyOptions, specifiers }'

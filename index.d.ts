@@ -18,16 +18,17 @@ export type Namespace = { [key: string]: any }
  * starting from the package name.
  * @param {baseDir} string The absolute path of the module, if not provided in
  * `name`.
- * @param {data} Data Optional metadata embedded by a loader or bundler.
- * @return unknown For ESM, a value assigned to `exports.default` when present.
- * For CommonJS, a value that replaces `module.exports`.
+ * @param {data} Data Optional metadata embedded by a bundler.
+ * @return any A value that can will be assigned to `exports.default`. This is
+ * equivalent to doing that assignment in the body of this function. For
+ * CommonJS modules, the value replaces `module.exports`.
  */
 export type HookFn<Data = unknown> = (
   exported: Namespace,
   name: string,
   baseDir: string|void,
   data?: Data
-) => unknown
+) => any
 
 export type Options = {
   internals?: boolean
@@ -67,15 +68,15 @@ export default Hook
  * @param {exported} { [string]: any } An object representing the exported
  * items of a module.
  * @param {specifier} string The original import or require specifier.
- * @param {data} Data Optional metadata embedded by a loader or bundler.
- * @param {format} string The intercepted module format.
+ * @param {data} Data Optional metadata embedded by a bundler.
+ * @param {format} string The intercepted module format, when available.
  */
 export type HookFunction<Data = unknown> = (
   url: string,
   exported: Namespace,
   specifier: string,
-  data: Data|undefined,
-  format: 'module'|'commonjs'
+  data?: Data,
+  format?: 'module'|'commonjs'
 ) => unknown
 
 /**
