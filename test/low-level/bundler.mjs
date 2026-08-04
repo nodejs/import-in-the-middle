@@ -89,7 +89,7 @@ const rebuilt = await createWrapperModule({
   load: unexpectedIo
 })
 
-match(rebuilt.code, /export \{ \$rebuilt as "rebuilt" \}/)
+match(rebuilt.code, /export \{ \$rebuilt as rebuilt \}/)
 match(rebuilt.code, /\nregister\(/)
 doesNotMatch(rebuilt.code, /registerWithData/)
 doesNotMatch(rebuilt.code, /\$foo/)
@@ -315,8 +315,21 @@ const commonJsReexportWrapper = await createWrapperModule({
   load: loadModule
 })
 
-match(commonJsReexportWrapper.code, /export \{ \$foo as "foo" \}/)
+match(commonJsReexportWrapper.code, /export \{ \$foo as foo \}/)
 doesNotMatch(commonJsReexportWrapper.code, /as default/)
+
+const quotedExportWrapper = await createWrapperModule({
+  module: {
+    url: 'file:///virtual/quoted-export.mjs',
+    format: 'module',
+    source: 'const value = 42; export { value as "quoted name" }',
+    specifier: './quoted-export.mjs'
+  },
+  resolve: unexpectedIo,
+  load: unexpectedIo
+})
+
+match(quotedExportWrapper.code, /export \{ \$quoted_name as "quoted name" \}/)
 
 /**
  * @param {string} specifier
