@@ -5,7 +5,8 @@
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules } from 'module'
-import getNodeModuleFormat from './lib/get-node-module-format.js'
+import { readFileSync } from 'fs'
+import createGetNodeModuleFormat from './lib/get-node-module-format.js'
 import { driveSync, driveAsync } from './lib/io.mjs'
 import { buildCommonJSWrapperSource, buildWrapperSource, processModule } from './lib/wrapper.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
@@ -16,6 +17,7 @@ import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 export { supportsSyncHooks }
 
 const isWin = process.platform === 'win32'
+const getNodeModuleFormat = createGetNodeModuleFormat(readFileSync)
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions

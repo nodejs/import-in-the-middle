@@ -1,6 +1,10 @@
 'use strict'
 
-const getNodeModuleFormat = require('./lib/get-node-module-format.js')
+const { readFileSync } = require('node:fs')
+
+const createGetNodeModuleFormat = require('./lib/get-node-module-format.js')
+
+const getNodeModuleFormat = createGetNodeModuleFormat(readFileSync)
 
 /** @type {typeof import('./bundler.mjs').createWrapperModule|undefined} */
 let createWrapperModuleImplementation
