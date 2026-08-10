@@ -194,6 +194,33 @@ registration (`register-hooks.mjs`, shown above) and for predicates constructed 
 the loader thread; it is not accepted through the `data` option of the asynchronous
 `module.register('import-in-the-middle/hook.mjs', ...)`.
 
+### Opting out of CJS source stripping
+
+On Node 22+, when a CJS module is loaded through the ESM translator and another
+loader hook provides its source (instead of leaving it `null` for Node to read
+natively), `require()` calls inside that CJS module for packages using the
+`"module-sync"` exports condition fail with `ERR_VM_MODULE_LINK_FAILURE`. To work
+around this Node bug, `import-in-the-middle` strips hook-provided source for
+CJS modules in the synchronous require chain, forcing Node to use its native CJS
+loader which handles this correctly.
+
+If you rely on a downstream loader hook seeing (and acting on) the source of
+CJS modules in the require chain, you can opt out of this workaround by passing
+`disableCjsSourceStripping: true` in the hook config. The workaround remains
+enabled by default.
+
+```js
+import { register } from 'import-in-the-middle/register-hooks.mjs'
+
+register({
+  include: ['package-i-want-to-include'],
+  disableCjsSourceStripping: true
+})
+```
+
+This option is accepted by both synchronous (`register-hooks.mjs`) and
+asynchronous (`module.register('import-in-the-middle/hook.mjs', ...)`) registration.
+
 ## TypeScript modules
 
 On Node.js versions that strip TypeScript types natively (those exposing
