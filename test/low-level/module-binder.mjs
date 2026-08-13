@@ -119,3 +119,71 @@ function makeSlot (initial) {
   const { write, read } = makeSlot(undefined)
   throws(() => binder.bind('foo', source, write, read, false), TypeError)
 }
+
+// A fallbackSource is not consulted while the primary source holds a value.
+{
+  const binder = new ModuleBinder()
+  const source = { foo: 1 }
+  const fallback = { get foo () { throw new Error('must not be read') } }
+  const { slot, write, read } = makeSlot(undefined)
+  binder.bind('foo', source, write, read, false, fallback)
+  strictEqual(slot.value, 1, 'primary value wins over the fallback')
+}
+
+// A primary source without the value (an `export *` name the aggregate
+// namespace dropped as ambiguous) reads the fallbackSource, synchronously.
+{
+  const binder = new ModuleBinder()
+  const source = {}
+  const fallback = { foo: 2 }
+  const { slot, write, read } = makeSlot(undefined)
+  binder.bind('foo', source, write, read, false, fallback)
+  strictEqual(slot.value, 2, 'undefined primary resolved from the fallback at bind time')
+}
+
+// A primary source still in its dead zone reads the fallbackSource,
+// synchronously — not deferred to a retry.
+{
+  const binder = new ModuleBinder()
+  const source = { get foo () { throw new ReferenceError('tdz') } }
+  const fallback = { foo: 3 }
+  const { slot, write, read } = makeSlot(undefined)
+  binder.bind('foo', source, write, read, false, fallback)
+  strictEqual(slot.value, 3, 'TDZ primary resolved from the fallback at bind time')
+}
+
+// A non-ReferenceError from the primary still propagates; the fallback is no
+// license to swallow real errors.
+{
+  const binder = new ModuleBinder()
+  const source = { get foo () { throw new TypeError('boom') } }
+  const fallback = { foo: 4 }
+  const { write, read } = makeSlot(undefined)
+  throws(() => binder.bind('foo', source, write, read, false, fallback), TypeError)
+}
+
+// Both sources in their dead zone still defers to the retry path, then
+// resolves from whichever source becomes live.
+{
+  const binder = new ModuleBinder()
+  let live = false
+  const dead = { get foo () { throw new ReferenceError('tdz') } }
+  const fallback = { get foo () { if (!live) throw new ReferenceError('tdz'); return 5 } }
+  const { slot, write, read } = makeSlot(undefined)
+  binder.bind('foo', dead, write, read, false, fallback)
+  strictEqual(slot.value, undefined, 'deferred while both sources are dead')
+  live = true
+  binder.flush()
+  await Promise.resolve()
+  strictEqual(slot.value, 5, 'resolved on retry once the fallback became live')
+}
+
+// useFallback (the source.default read) composes with a fallbackSource.
+{
+  const binder = new ModuleBinder()
+  const source = {}
+  const fallback = { 'module.exports': 6 }
+  const { slot, write, read } = makeSlot(undefined)
+  binder.bind('module.exports', source, write, read, true, fallback)
+  strictEqual(slot.value, 6, 'fallbackSource read when both named and default are absent')
+}
