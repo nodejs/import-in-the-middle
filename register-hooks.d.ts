@@ -1,11 +1,12 @@
 /**
  * Options for {@link register}. `include`/`exclude` accept bare specifiers,
  * `file:` URLs or regular expressions, matched against the module being
- * resolved.
+ * resolved. CJS source stripping remains enabled unless explicitly disabled.
  */
 export type RegisterHooksOptions = {
   include?: Array<string | RegExp>
   exclude?: Array<string | RegExp>
+  disableCjsSourceStripping?: boolean
 }
 
 /**
