@@ -38,6 +38,7 @@ let registered = false
  * @param {object} [options]
  * @param {Array<string|RegExp>} [options.include] Only intercept these modules.
  * @param {Array<string|RegExp>} [options.exclude] Never intercept these modules.
+ * @param {boolean} [options.disableCjsSourceStripping] Leave hook-provided CJS source unchanged.
  * @returns {void}
  */
 export function register (options) {

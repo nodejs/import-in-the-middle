@@ -417,6 +417,7 @@ export function createHook (meta) {
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   let includeModules, excludeModules
   let shouldInclude = defaultShouldInclude
+  let disableCjsSourceStripping = false
 
   // Track CJS module URLs that IITM has wrapped. On Node 24+, CJS modules loaded
   // via loadCJSModule (in an ESM import chain) have their require() calls for
@@ -478,6 +479,10 @@ export function createHook (meta) {
     // matcher and is called with the resolved URL and specifier; otherwise the
     // default applies the include/exclude options.
     shouldInclude = typeof data.shouldInclude === 'function' ? data.shouldInclude : defaultShouldInclude
+
+    if (data.disableCjsSourceStripping === true) {
+      disableCjsSourceStripping = true
+    }
 
     if (data.addHookMessagePort) {
       data.addHookMessagePort.on('message', (modules) => {
@@ -801,7 +806,7 @@ register(${JSON.stringify(realUrl)}, __binder.namespace, __binder.set, __binder.
     // ERR_VM_MODULE_LINK_FAILURE. Work around this Node bug by stripping
     // hook-provided source for CJS modules in the synchronous require chain,
     // forcing Node to use its native CJS loader which handles this correctly.
-    if (cjsInIitmChain.has(url)) {
+    if (cjsInIitmChain.has(url) && !disableCjsSourceStripping) {
       const result = await parentLoad(url, context)
       if (result.format === 'commonjs' && result.source != null) {
         return {
@@ -835,7 +840,7 @@ register(${JSON.stringify(realUrl)}, __binder.namespace, __binder.set, __binder.
       return nextLoad(deleteIitm(url), context)
     }
 
-    if (cjsInIitmChain.has(url)) {
+    if (cjsInIitmChain.has(url) && !disableCjsSourceStripping) {
       const result = nextLoad(url, context)
       if (result.format === 'commonjs' && result.source != null) {
         return {
