@@ -3,3 +3,4 @@
 // while processing this module.
 export * from './reexport-nested-leaf.mjs'
 export * from './reexport-nested-mid.mjs'
+export default 'not-reexported'

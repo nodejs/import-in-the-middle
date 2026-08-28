@@ -24,26 +24,26 @@ const nonEnumerableNames = Object.getOwnPropertyNames(moduleValue)
 
 const io = { load: async () => ({ source: null, format: 'builtin' }) }
 
-const exports = await driveAsync(getExports(builtin, { format: 'builtin' }), io)
+const { exportNames } = await driveAsync(getExports(builtin, { format: 'builtin' }), io)
 
 // The whole point: non-enumerable own properties (e.g. `prototype`) that
 // Object.keys would miss must still be discovered.
 ok(nonEnumerableNames.length > 0, `precondition: ${builtin} has non-enumerable own properties`)
 for (const name of nonEnumerableNames) {
-  ok(exports.has(name), `non-enumerable ${name} should be in exports`)
+  ok(exportNames.has(name), `non-enumerable ${name} should be in exports`)
 }
 
 // Sanity check: an enumerable export should still be present.
-ok(exports.has('once'), 'enumerable export (once) should be in exports')
-ok(exports.has('default'), 'default should be in exports')
+ok(exportNames.has('once'), 'enumerable export (once) should be in exports')
+ok(exportNames.has('default'), 'default should be in exports')
 
 // Node >= 23 adds `module.exports` as an alias for the default export in CJS modules
 if (hasModuleExportsCJSDefault) {
-  ok(exports.has('module.exports'), 'module.exports should be in exports on Node >= 23')
+  ok(exportNames.has('module.exports'), 'module.exports should be in exports on Node >= 23')
 } else {
-  ok(!exports.has('module.exports'), 'module.exports should not be in exports on Node < 23')
+  ok(!exportNames.has('module.exports'), 'module.exports should not be in exports on Node < 23')
 }
 
-strictEqual(typeof exports.has, 'function', 'getExports should return a Set')
+strictEqual(typeof exportNames.has, 'function', 'builtin exportNames should be a Set')
 
 console.log('✅ getExports includes non-enumerable built-in module exports')
