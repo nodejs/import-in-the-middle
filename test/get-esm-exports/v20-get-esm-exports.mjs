@@ -23,6 +23,11 @@ fixture.split('\n').forEach(line => {
   console.log(`${mod}\n  ✅ contains exports: ${testStr}`)
 })
 
+assert.deepEqual(Array.from(getEsmExports('export type { Type } from "module-name"')), [])
+assert.deepEqual(Array.from(getEsmExports('export type * from "module-name"')), [])
+assert.deepEqual(Array.from(getEsmExports('export const alpha: number = 1, beta: string = "two"')), ['alpha', 'beta'])
+assert.deepEqual(Array.from(getEsmExports('const type = 1; export { type }')), ['type'])
+
 // // Generate fixture data
 // fixture.split('\n').forEach(line => {
 //   if (!line.includes('export ')) {

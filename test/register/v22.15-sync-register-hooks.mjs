@@ -73,6 +73,7 @@ nodeModule.registerHooks({
 register()
 
 let somethingHooked = false
+let typescriptCjsExports
 let wrapFailureHooked = false
 
 // No module filter: match fixtures by file name, mirroring test/hook/static-import.mjs.
@@ -81,6 +82,9 @@ new Hook((exports, name) => {
   if (typeof name === 'string' && /something\.mjs/.test(name)) {
     somethingHooked = true
     exports.foo += 15
+  }
+  if (typeof name === 'string' && name.endsWith('/typescript-cjs-hook.cts')) {
+    typescriptCjsExports = exports
   }
   if (typeof name === 'string' && /sync-wrap-failure/.test(name)) {
     wrapFailureHooked = true
@@ -94,6 +98,11 @@ const namespace = await import('../fixtures/something.mjs')
 ok(somethingHooked, 'sync hook should have run for something.mjs')
 strictEqual(namespace.foo, 57, 'hook-mutated named export should be visible through the wrapper')
 strictEqual(typeof namespace.default, 'function', 'default export should be preserved')
+
+const typescriptCjs = await import('../fixtures/typescript-cjs-hook.cts')
+strictEqual(typescriptCjs.default.epsilon, 5)
+strictEqual(typescriptCjs.default.zeta({ kind: 'square' }), 'square')
+ok(typescriptCjsExports, 'sync hook should instrument commonjs-typescript with type-only exports')
 
 // When IITM fails to wrap, it falls back to the upstream loader: the module
 // still loads, but it cannot be Hook'ed because it was never wrapped.
