@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.3.3...import-in-the-middle-v3.4.0) (2026-08-28)
+
+
+### Features
+
+* allow disabling CJS source stripping ([#281](https://github.com/nodejs/import-in-the-middle/issues/281)) ([a37dc57](https://github.com/nodejs/import-in-the-middle/commit/a37dc574cff1d8c3e4a8a0ecc4033fdc75be1627))
+
 ## [3.3.3](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.3.2...import-in-the-middle-v3.3.3) (2026-07-23)
 
 
