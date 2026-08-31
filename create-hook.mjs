@@ -198,21 +198,31 @@ function emitWarning (err) {
  * of how the loader is driven, so both the synchronous and asynchronous paths
  * share it.
  *
- * The value is read from `namespaceVar`, the wrapper's namespace binding for the
- * module that *defines* the export. For a module's own exports that is the
- * wrapped module itself; for a name re-exported through `export *` it is the
- * leaf that declares it. Reading from the defining module rather than the
- * aggregating one keeps the value resolvable when the same binding reaches the
- * aggregator through more than one re-export chain — Node sees those chains as
- * distinct wrapper modules and leaves the name ambiguous (hence `undefined`) on
- * the aggregate namespace, while the defining module always holds it (#171).
+ * The value is read from `namespaceVar`, the wrapped module's own namespace. A
+ * name pulled in through `export *` additionally passes `fallbackVar`, the
+ * namespace of the module that *defines* it: the binder reads the aggregate
+ * namespace first (so a hook applied along the re-export chain is still
+ * observed) and falls back to the defining module when the aggregate does not
+ * hold the value. That fallback covers two cases the aggregate namespace cannot
+ * serve synchronously:
+ *   - the same binding reaching the aggregator through more than one re-export
+ *     chain, which Node leaves ambiguous (hence `undefined`) on the aggregate
+ *     namespace because under iitm the chains are distinct wrapper modules,
+ *     while the defining module always holds it (#171); and
+ *   - a circular `export *` where the defining module is still in its temporal
+ *     dead zone on the aggregate namespace when this wrapper evaluates, yet has
+ *     already hoisted the binding in its own namespace, so deferring to a late
+ *     async retry would let a synchronous importer read `undefined` (#269).
  *
  * @param {string} n The exported name.
  * @param {string} srcUrl The URL of the module the export belongs to.
- * @param {string} namespaceVar The wrapper binding holding `srcUrl`'s namespace.
+ * @param {string} namespaceVar The wrapper binding holding the primary namespace.
+ * @param {string} [fallbackVar] The wrapper binding holding the defining
+ * module's namespace, for `export *`-sourced names. Omitted for a module's own
+ * exports, which only ever read from `namespaceVar`.
  * @returns {string}
  */
-function buildSetter (n, srcUrl, namespaceVar) {
+function buildSetter (n, srcUrl, namespaceVar, fallbackVar) {
   const variableName = `$${n.replace(/[^a-zA-Z0-9_$]/g, '_')}`
   const objectKey = JSON.stringify(n)
   const reExportedName = n === 'default' ? n : objectKey
@@ -226,8 +236,10 @@ function buildSetter (n, srcUrl, namespaceVar) {
     ? ''
     : `export { ${variableName} as ${reExportedName} }`
 
+  const fallbackArg = fallbackVar === undefined ? '' : `, ${fallbackVar}`
+
   return `let ${variableName}
-__binder.bind(${objectKey}, ${namespaceVar}, v => { ${variableName} = v }, () => ${variableName}, ${useFallback})
+__binder.bind(${objectKey}, ${namespaceVar}, v => { ${variableName} = v }, () => ${variableName}, ${useFallback}${fallbackArg})
 ${reExportLine}`
 }
 
@@ -254,10 +266,10 @@ ${reExportLine}`
  * before descending into its subtree and removed once that subtree finishes, so
  * it tracks the active path rather than every URL ever visited.
  * @param {Map<string, string>} [params.originNamespaces] Shared registry mapping
- * a defining-module URL to the wrapper namespace alias a same-origin `export *`
- * collision must read it from. Absent until the first such collision; then
- * threaded through the recursion so one defining module yields one alias and
- * {@link buildWrapperSource} imports each once. Only `*`-collided names use it;
+ * a defining-module URL to the wrapper namespace alias its `export *`-sourced
+ * names fall back to. Absent until the first `export *`; then threaded through
+ * the recursion so one defining module yields one alias and
+ * {@link buildWrapperSource} imports each once. Only `*`-sourced names use it;
  * every other export reads from the wrapped module's own `namespace`.
  *
  * @returns {Generator<Array, { setters: Map<string, string>, origins: (Map<string, string> | undefined), originNamespaces: (Map<string, string> | undefined) }>}
@@ -265,7 +277,7 @@ ${reExportLine}`
  * setters for all the exports from the module and any transitive export all
  * modules. `origins` (the defining module per `*`-sourced name) is `undefined`
  * for a module with no `export *`; `originNamespaces` stays `undefined` unless a
- * same-origin `*` collision actually needed an alias.
+ * `*` re-export actually minted an alias.
  */
 function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen, originNamespaces }) {
   const exportNames = yield * getExports(srcUrl, context)
@@ -279,15 +291,13 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
   // and one write per name, not two.
   let starOrigins
 
-  // A name pulled in through more than one `export *` chain that all bottom out
-  // at the same module stays exported (ECMAScript ResolveExport;
-  // tc39/ecma262#3715), but the *aggregate* namespace this wrapper imports drops
-  // it: under iitm the chains are distinct wrapped modules, so Node sees the
-  // re-export as ambiguous and the name reads back undefined. Only those names
-  // must instead read from their defining module's own namespace, which always
-  // holds the value. `originNamespaces` maps such a defining module to the alias
-  // the wrapper imports for it; it is allocated on the first surviving
-  // collision, so a module without one emits no extra import (#171).
+  // Every `export *`-sourced name falls back to its defining module's own
+  // namespace when the aggregate namespace this wrapper imports doesn't hold the
+  // value — because that binding is ambiguous across chains (#171) or still in
+  // its temporal dead zone on the aggregate mid-cycle (#269). `originNamespaces`
+  // maps each defining module to the alias the wrapper imports for it; it is
+  // allocated on the first `export *`, so a module without one emits no extra
+  // import.
   const ensureOriginNamespace = (origin) => {
     originNamespaces ??= new Map()
     let alias = originNamespaces.get(origin)
@@ -300,27 +310,26 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
 
   const addSetter = (name, setter, isStarExport, origin) => {
     if (setters.has(name)) {
-      if (isStarExport) {
-        // `starOrigins.has(name)` means the existing entry also came from a `*`
-        // re-export (an explicit export would not be tracked here).
-        if (starOrigins.has(name)) {
-          if (starOrigins.get(name) === origin) {
-            // The same binding reached through two `*` re-export chains. It
-            // stays exported, but the aggregate namespace dropped it, so point
-            // its setter at the defining module's namespace instead.
-            setters.set(name, buildSetter(name, origin, ensureOriginNamespace(origin)))
-          } else {
-            // Genuinely ambiguous: two `*` re-exports name it from different
-            // modules. Per ResolveExport the name is excluded entirely.
-            setters.delete(name)
-            starOrigins.delete(name)
-          }
+      // `starOrigins.has(name)` means the existing entry also came from a `*`
+      // re-export (an explicit export would not be tracked here).
+      if (isStarExport && starOrigins.has(name)) {
+        if (starOrigins.get(name) !== origin) {
+          // Genuinely ambiguous: two `*` re-exports name it from different
+          // modules. Per ResolveExport the name is excluded entirely.
+          setters.delete(name)
+          starOrigins.delete(name)
         }
-        // An explicit export already shadows the `*` re-export; leave it.
+        // Same binding reached through two `*` chains: it stays exported and the
+        // existing setter already falls back to that defining module, so keep it.
       }
+      // An explicit export already shadows the `*` re-export; leave it.
     } else {
       if (isStarExport) {
         starOrigins.set(name, origin)
+        // Read from the aggregate namespace, falling back to the defining
+        // module (see ensureOriginNamespace) so the value resolves even when the
+        // aggregate drops it or holds it in a temporal dead zone.
+        setter = buildSetter(name, origin, 'namespace', ensureOriginNamespace(origin))
       }
 
       setters.set(name, setter)
@@ -384,9 +393,9 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
         // the whole tree) rather than orphaning the child's into a second Map.
         originNamespaces ??= sub.originNamespaces
 
-        // Star targets build their setters against `namespace` like any other
-        // module; only a surviving same-origin collision (in addSetter) rewrites
-        // the affected name to read from its defining module's alias.
+        // addSetter rebuilds each `*`-sourced name to read from the aggregate
+        // namespace with a fallback to its defining module, so the sub's own
+        // setter string is only a placeholder here.
         for (const [name, setter] of sub.setters) {
           addSetter(name, setter, true, sub.origins?.get(name) ?? result.url)
         }
@@ -655,11 +664,10 @@ export function createHook (meta) {
   // iitm's proxy. Pure string generation shared by the asynchronous and
   // synchronous `load` paths.
   function buildWrapperSource (realUrl, setters, originalSpecifier, originNamespaces) {
-    // The wrapped module imports its namespace as `namespace`, which serves
-    // every export but the ones a same-origin `export *` collision forced onto
-    // their defining module (#171): the aggregate namespace drops those as
-    // ambiguous under iitm, so each such defining module gets its own alias the
-    // wrapper imports. Absent the registry (no such collision) nothing is added.
+    // The wrapped module imports its namespace as `namespace`. Every
+    // `export *`-sourced name additionally falls back to its defining module,
+    // so each such module gets its own alias the wrapper imports here (#171,
+    // #269). Absent the registry (the module has no `export *`) nothing is added.
     let originImports = ''
     if (originNamespaces !== undefined) {
       for (const [originUrl, alias] of originNamespaces) {
