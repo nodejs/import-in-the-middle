@@ -27,6 +27,25 @@ function makeBinder (source, key = 'foo', sources) {
   return { binder: new ModuleBinder(source, [key], write, sources), slot }
 }
 
+/**
+ * @returns {{ callbacks: Array<() => void>, restore: () => void }}
+ */
+function interceptTimeouts () {
+  const callbacks = []
+  const originalSetTimeout = globalThis.setTimeout
+  /** @param {() => void} callback */
+  globalThis.setTimeout = (callback) => {
+    callbacks.push(callback)
+    return { unref () {} }
+  }
+  return {
+    callbacks,
+    restore () {
+      globalThis.setTimeout = originalSetTimeout
+    }
+  }
+}
+
 // Construction seeds the current source value into the export and module object.
 {
   const source = { foo: 42 }
@@ -88,21 +107,26 @@ function makeBinder (source, key = 'foo', sources) {
 // A source still in its dead zone on the retry read keeps the updater pending
 // (ReferenceError from the retried read is swallowed), then resolves.
 {
-  let stage = 0
-  const source = {
-    get foo () {
-      // Throw at bind time and on the first flush; resolve afterwards.
-      if (stage++ < 2) throw new ReferenceError('tdz')
-      return 11
+  const { callbacks, restore } = interceptTimeouts()
+  try {
+    let stage = 0
+    const source = {
+      get foo () {
+        // Throw at bind time and on the first flush; resolve afterwards.
+        if (stage++ < 2) throw new ReferenceError('tdz')
+        return 11
+      }
     }
+    const { binder, slot } = makeBinder(source)
+    strictEqual(slot.value, undefined, 'still deferred after bind')
+    binder.flush()
+    await Promise.resolve()
+    strictEqual(slot.value, undefined, 'still deferred after first flush attempt')
+    callbacks.shift()()
+    strictEqual(slot.value, 11, 'resolved on a later retry once live')
+  } finally {
+    restore()
   }
-  const { binder, slot } = makeBinder(source)
-  strictEqual(slot.value, undefined, 'still deferred after bind')
-  binder.flush()
-  await Promise.resolve()
-  strictEqual(slot.value, undefined, 'still deferred after first flush attempt')
-  await new Promise((resolve) => setTimeout(resolve, 20))
-  strictEqual(slot.value, 11, 'resolved on a later retry once live')
 }
 
 // A non-ReferenceError thrown while seeding at bind time propagates.
@@ -124,13 +148,7 @@ function makeBinder (source, key = 'foo', sources) {
 // Exhausting every retry releases the pending updater and later flushes stay
 // inactive, even if the source eventually gets a value.
 {
-  const callbacks = []
-  const originalSetTimeout = globalThis.setTimeout
-  /** @param {() => void} callback */
-  globalThis.setTimeout = (callback) => {
-    callbacks.push(callback)
-    return { unref () {} }
-  }
+  const { callbacks, restore } = interceptTimeouts()
   try {
     const source = {}
     const { binder, slot } = makeBinder(source)
@@ -143,6 +161,6 @@ function makeBinder (source, key = 'foo', sources) {
     await Promise.resolve()
     strictEqual(slot.value, undefined, 'exhausted updater is not retried')
   } finally {
-    globalThis.setTimeout = originalSetTimeout
+    restore()
   }
 }
