@@ -17,6 +17,7 @@ let moduleExportsNullStarExports
 let moduleExportsUndefinedStarExports
 let ambiguousRepeatedExports
 let ambiguousThirdExports
+let cjsReexportEsmStarExports
 
 // eslint-disable-next-line no-new
 new Hook((exports, name) => {
@@ -49,6 +50,9 @@ new Hook((exports, name) => {
   if (typeof name === 'string' && name.includes('reexport-ambiguous-third.mjs')) {
     ambiguousThirdExports = exports
   }
+  if (typeof name === 'string' && name.includes('cjs-reexport-esm-star.js')) {
+    cjsReexportEsmStarExports = exports
+  }
 })
 
 const lib = await import('../fixtures/reexport-same-source.mjs')
@@ -60,6 +64,7 @@ const moduleExportsStar = await import('../fixtures/module-exports-star.mjs')
 const moduleExportsCjsStar = await import('../fixtures/module-exports-cjs-star.mjs')
 const moduleExportsNullStar = await import('../fixtures/module-exports-null-star.mjs')
 const moduleExportsUndefinedStar = await import('../fixtures/module-exports-undefined-star.mjs')
+const cjsReexportEsmStar = await import('../fixtures/cjs-reexport-esm-star.js')
 
 strictEqual(sawSameSource, true)
 strictEqual(lib.val, 1)
@@ -84,4 +89,6 @@ if (parseInt(process.versions.node, 10) >= 23) {
   strictEqual('module.exports' in moduleExportsCjsStar, false)
   strictEqual('module.exports' in moduleExportsCjsStarExports, false)
 }
+strictEqual(cjsReexportEsmStar.nested, 42)
+strictEqual(cjsReexportEsmStarExports?.nested, 42)
 strictEqual(repeated.foo, 'hooked')
