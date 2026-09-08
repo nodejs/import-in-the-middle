@@ -105,6 +105,21 @@ const emptyPassthroughWrapper = await createWrapperModule({
 })
 deepStrictEqual(emptyPassthroughWrapper, wrapper)
 
+const emptySourceUrl = 'virtual:iitm-empty'
+const emptySourceWrapper = await createWrapperModule({
+  module: {
+    url: emptySourceUrl,
+    format: 'module',
+    source: '',
+    specifier: emptySourceUrl
+  },
+  resolve: unexpectedIo,
+  load: unexpectedIo
+})
+
+strictEqual(emptySourceWrapper.imports[1].target.url, emptySourceUrl)
+doesNotMatch(emptySourceWrapper.code, /^export /m)
+
 const formatDirectory = await mkdtemp(join(tmpdir(), 'iitm-bundler-format-'))
 try {
   const packageJsonUrl = pathToFileURL(join(formatDirectory, 'package.json')).href
@@ -336,7 +351,10 @@ const commonJsWrapper = await createWrapperModule({
   module: {
     url: commonJsUrl,
     format: 'commonjs',
-    source: '#!/usr/bin/env node\nmodule.exports = { value: 42 }\nreturn\nmodule.exports.unreachable = true',
+    source: '#!/usr/bin/env node\n' +
+      'module.exports = { value: 42, argumentsLength: arguments.length }\n' +
+      'return\n' +
+      'module.exports.unreachable = true',
     specifier: './something.js',
     data: { version: '1.0.0' },
     passthroughExports: unexpectedPassthroughSelection
@@ -428,7 +446,7 @@ const commonJsDirectory = await mkdtemp(join(tmpdir(), 'iitm-bundler-commonjs-')
 try {
   const commonJsFilename = join(commonJsDirectory, 'wrapper.cjs')
   await writeFile(commonJsFilename, commonJsCode)
-  deepStrictEqual(require(commonJsFilename), { value: 42, hooked: true })
+  deepStrictEqual(require(commonJsFilename), { value: 42, argumentsLength: 5, hooked: true })
   strictEqual(unfilteredCalls, 2)
 } finally {
   unfilteredHook.unhook()
@@ -559,7 +577,12 @@ const commonJsReexportWrapper = await createWrapperModule({
   load: loadModule
 })
 
-match(commonJsReexportWrapper.code, /export \{ \$0 as foo \}/)
+match(commonJsReexportWrapper.code, /export \{ \$0 as foo(?:,| \})/)
+if (parseInt(process.versions.node, 10) >= 23) {
+  match(commonJsReexportWrapper.code, /as "module\.exports"/)
+} else {
+  doesNotMatch(commonJsReexportWrapper.code, /as "module\.exports"/)
+}
 doesNotMatch(commonJsReexportWrapper.code, /as default/)
 
 const quotedExportWrapper = await createWrapperModule({
