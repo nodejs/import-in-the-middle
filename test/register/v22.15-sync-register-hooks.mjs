@@ -73,6 +73,8 @@ nodeModule.registerHooks({
 register()
 
 let somethingHooked = false
+let collisionHooked = false
+let starBuiltinExports
 let typescriptCjsExports
 let wrapFailureHooked = false
 
@@ -82,6 +84,15 @@ new Hook((exports, name) => {
   if (typeof name === 'string' && /something\.mjs/.test(name)) {
     somethingHooked = true
     exports.foo += 15
+  }
+  if (typeof name === 'string' && name.endsWith('/export-name-collision.mjs')) {
+    collisionHooked = true
+    exports['a-b'] = 'wrapped-dashed'
+    Reflect.set(exports, '__proto__', 'wrapped-proto')
+    exports.a_b = 'wrapped-underscored'
+  }
+  if (typeof name === 'string' && name.endsWith('/star-builtin.mjs')) {
+    starBuiltinExports = exports
   }
   if (typeof name === 'string' && name.endsWith('/typescript-cjs-hook.cts')) {
     typescriptCjsExports = exports
@@ -98,6 +109,16 @@ const namespace = await import('../fixtures/something.mjs')
 ok(somethingHooked, 'sync hook should have run for something.mjs')
 strictEqual(namespace.foo, 57, 'hook-mutated named export should be visible through the wrapper')
 strictEqual(typeof namespace.default, 'function', 'default export should be preserved')
+
+const collision = await import('../fixtures/export-name-collision.mjs')
+ok(collisionHooked, 'sync hook should run for colliding export names')
+strictEqual(collision['a-b'], 'wrapped-dashed', 'quoted export should keep an independent wrapper binding')
+strictEqual(Reflect.get(collision, '__proto__'), 'wrapped-proto', 'prototype-shaped export should keep its wrapper binding')
+strictEqual(collision.a_b, 'wrapped-underscored', 'identifier export should keep an independent wrapper binding')
+
+const starBuiltin = await import('../fixtures/star-builtin.mjs')
+strictEqual('module.exports' in starBuiltin, false, 'export star should exclude the builtin default alias')
+strictEqual('module.exports' in starBuiltinExports, false, 'hook proxy should exclude the builtin default alias')
 
 const typescriptCjs = await import('../fixtures/typescript-cjs-hook.cts')
 strictEqual(typescriptCjs.default.epsilon, 5)

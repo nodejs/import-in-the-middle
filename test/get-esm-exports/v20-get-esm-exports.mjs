@@ -1,6 +1,6 @@
 'use strict'
 
-import getEsmExports from '../../lib/get-esm-exports.mjs'
+import getEsmExports, { lexEsm } from '../../lib/get-esm-exports.mjs'
 import fs from 'fs'
 import assert from 'assert'
 import path from 'path'
@@ -27,6 +27,11 @@ assert.deepEqual(Array.from(getEsmExports('export type { Type } from "module-nam
 assert.deepEqual(Array.from(getEsmExports('export type * from "module-name"')), [])
 assert.deepEqual(Array.from(getEsmExports('export const alpha: number = 1, beta: string = "two"')), ['alpha', 'beta'])
 assert.deepEqual(Array.from(getEsmExports('const type = 1; export { type }')), ['type'])
+assert.deepEqual(lexEsm('export const direct = 1; export * from "dependency"', 'file:///parent.mjs'), {
+  exportNames: ['direct'],
+  starReexports: [{ specifier: 'dependency', parentURL: 'file:///parent.mjs' }],
+  hasModuleSyntax: true
+})
 
 // // Generate fixture data
 // fixture.split('\n').forEach(line => {
