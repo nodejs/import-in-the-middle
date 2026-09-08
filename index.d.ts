@@ -18,6 +18,7 @@ export type Namespace = { [key: string]: any }
  * starting from the package name.
  * @param {baseDir} string The absolute path of the module, if not provided in
  * `name`.
+ * The `data` and `format` arguments are experimental and may change in minor versions.
  * @param {data} Data Optional metadata embedded by a bundler.
  * @param {format} string The intercepted module format, when available.
  * @return any A value that can will be assigned to `exports.default`. This is
@@ -70,6 +71,7 @@ export default Hook
  * @param {exported} { [string]: any } An object representing the exported
  * items of a module.
  * @param {specifier} string The original import or require specifier.
+ * The `data` and `format` arguments are experimental and may change in minor versions.
  * @param {data} Data Optional metadata embedded by a bundler.
  * @param {format} string The intercepted module format, when available.
  */

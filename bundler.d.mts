@@ -73,6 +73,10 @@ export type CreateWrapperModuleOptions<Data extends JsonValue = JsonValue> = {
   ) => LoadResult | Promise<LoadResult>
 }
 
+/**
+ * EXPERIMENTAL
+ * This API is experimental and may change in minor versions.
+ */
 export declare function createWrapperModule<Data extends JsonValue = JsonValue>(
   options: CreateWrapperModuleOptions<Data>
 ): Promise<WrapperModule>

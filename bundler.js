@@ -10,6 +10,9 @@ const getNodeModuleFormat = createGetNodeModuleFormat(readFileSync)
 let createWrapperModuleImplementation
 
 /**
+ * EXPERIMENTAL
+ * This API is experimental and may change in minor versions.
+ *
  * @param {Parameters<typeof import('./bundler.mjs').createWrapperModule>[0]} options
  */
 async function createWrapperModule (options) {
@@ -18,4 +21,9 @@ async function createWrapperModule (options) {
 }
 
 exports.createWrapperModule = createWrapperModule
+
+/**
+ * EXPERIMENTAL
+ * This API is experimental and may change in minor versions.
+ */
 exports.getNodeModuleFormat = getNodeModuleFormat

@@ -116,6 +116,8 @@ node --import=./instrument.mjs ./my-app.mjs
 
 ## Bundler integrations
 
+> **Note:** The bundler integration API is experimental. It may change in minor versions.
+
 Bundlers can generate ESM and CommonJS wrappers with
 `createWrapperModule`:
 

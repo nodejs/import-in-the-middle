@@ -57,6 +57,9 @@ const runtimeUrl = new URL('./lib/bundler-runtime.js', import.meta.url).href
  */
 
 /**
+ * EXPERIMENTAL
+ * This API is experimental and may change in minor versions.
+ *
  * Creates an ESM wrapper without embedding bundler-specific module identifiers.
  *
  * @param {object} options
