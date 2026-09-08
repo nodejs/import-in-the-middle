@@ -1,11 +1,6 @@
-// Regression test for the es-module-lexer swap: under
-// `--disallow-code-generation-from-strings` the default Wasm build's internal
-// eval no-ops, so it stops decoding import specifiers and quoted export names.
-// IITM then rebuilds `export * from` as `* from undefined` and keeps quoted
-// names quoted, wrapping the wrong (or no) exports. get-esm-exports falls back
-// to the eval-free asm.js build under the flag; this drives the real Hook to
-// prove both decode paths still resolve. The flag goes in the child's execArgv
-// so the loader thread inherits it.
+// es-module-lexer v3 decodes strings without eval. Drive the real Hook under
+// `--disallow-code-generation-from-strings` to prove that quoted export names
+// and bare star re-export specifiers remain available to the wrapper.
 import { strictEqual } from 'assert'
 import { spawn } from 'child_process'
 
