@@ -1,6 +1,6 @@
 'use strict'
 
-import getEsmExports, { lexEsm } from '../../lib/get-esm-exports.mjs'
+import getEsmExports, { lexEsm, lexEsmWithStaticImports } from '../../lib/get-esm-exports.mjs'
 import fs from 'fs'
 import assert from 'assert'
 import path from 'path'
@@ -32,6 +32,33 @@ assert.deepEqual(lexEsm('export const direct = 1; export * from "dependency"', '
   starReexports: [{ specifier: 'dependency', parentURL: 'file:///parent.mjs' }],
   hasModuleSyntax: true
 })
+assert.deepEqual(
+  lexEsmWithStaticImports(
+    'import value from "dependency"; export * from "star"; export { other } from "named"; export { value }',
+    'file:///parent.mjs'
+  ),
+  {
+    exportNames: ['other', 'value'],
+    starReexports: [{ specifier: 'star', parentURL: 'file:///parent.mjs' }],
+    staticImports: 'dependency',
+    hasModuleSyntax: true
+  }
+)
+assert.deepEqual(lexEsmWithStaticImports('export * from "star"', 'file:///parent.mjs'), {
+  exportNames: [],
+  starReexports: [{ specifier: 'star', parentURL: 'file:///parent.mjs' }],
+  staticImports: false,
+  hasModuleSyntax: true
+})
+assert.deepEqual(
+  lexEsmWithStaticImports('import type { Type } from "types"; export type { Type }', 'file:///parent.mjs'),
+  {
+    exportNames: [],
+    starReexports: undefined,
+    staticImports: false,
+    hasModuleSyntax: true
+  }
+)
 
 // // Generate fixture data
 // fixture.split('\n').forEach(line => {
