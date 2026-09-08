@@ -36,12 +36,46 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 /** @typedef {import('node:module').LoadHookContext} LoadContext */
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
 /** @typedef {string | { specifier: string, format: 'module-typescript' | 'commonjs-typescript' }} SpecifierData */
+/** @typedef {{ specifier: string, parentURL: string }} InitiatingImport */
 /** @typedef {{ name: string, origin: string }} StarBinding */
 /**
  * @typedef {object} ProcessResult
  * @property {string[] | Map<string, string | StarBinding>} bindings
  * @property {Map<string, string> | undefined} origins
+ * @property {Map<string, Map<string, string>> | undefined} [cyclicImports]
  */
+/**
+ * @typedef {object} CycleState
+ * @property {string} rootUrl
+ * @property {Map<string, Map<string, string>> | undefined} imports
+ */
+
+/** @typedef {Map<string, string | Set<string>>} CyclicImportTargets */
+
+/**
+ * @param {string} specifier The descendant module's static import specifier.
+ * @param {string} parentURL The descendant module URL.
+ * @param {CycleState} state The wrapper root and detected cycle edges.
+ */
+function addCyclicImport (specifier, parentURL, state) {
+  let targets = state.imports?.get(parentURL)
+  if (targets === undefined) {
+    state.imports ??= new Map()
+    targets = new Map()
+    state.imports.set(parentURL, targets)
+  }
+  targets.set(specifier, state.rootUrl)
+}
+
+/**
+ * @param {string} specifier The descendant module's static import specifier.
+ * @param {string} parentURL The descendant module URL.
+ * @param {CycleState} state The wrapper root and detected cycle edges.
+ */
+function inspectCyclicImport (specifier, parentURL, state) {
+  if (specifier.startsWith('node:')) return
+  addCyclicImport(specifier, parentURL, state)
+}
 
 function hasIitm (url) {
   // Fast path: avoid URL parsing on the hot path when there's clearly no iitm.
@@ -221,14 +255,35 @@ function shouldExcludeExport (name, sourceUrl) {
  * created lazily once `depth` crosses {@link STAR_CYCLE_DEPTH}. A URL is added
  * before descending into its subtree and removed once that subtree finishes, so
  * it tracks the active path rather than every URL ever visited.
+ * @param {string} [params.rootUrl = params.srcUrl] The wrapper root URL.
+ * @param {CycleState} [params.cycleState] The wrapper root and detected cycle edges.
  * @returns {Generator<Array, ProcessResult>}
  * A generator that yields I/O operations and ultimately returns the shimmed
  * bindings for all the exports from the module and any transitive export all
  * modules. `origins` (the defining module per `*`-sourced name) is `undefined`
  * for a module with no `export *`.
  */
-function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen }) {
-  const { exportNames, starReexports } = yield * getExports(srcUrl, context)
+function * processModule ({
+  srcUrl,
+  context,
+  excludeDefault = false,
+  depth = 0,
+  seen,
+  rootUrl = srcUrl,
+  cycleState
+}) {
+  let isCycleRoot = false
+  const moduleExports = yield * getExports(srcUrl, context, cycleState !== undefined)
+  const { exportNames, starReexports } = moduleExports
+
+  if (cycleState !== undefined) {
+    const { staticImports } = moduleExports
+    if (typeof staticImports === 'string') {
+      inspectCyclicImport(staticImports, srcUrl, cycleState)
+    } else if (staticImports !== undefined && staticImports !== false) {
+      for (const specifier of staticImports) inspectCyclicImport(specifier, srcUrl, cycleState)
+    }
+  }
 
   // Most modules have no export star. Keep that path array-backed so it pays
   // neither merge bookkeeping nor a Map lookup for each direct export.
@@ -243,6 +298,11 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
       bindings.push(name)
     }
     return { bindings, origins: undefined }
+  }
+
+  if (cycleState === undefined) {
+    cycleState = { rootUrl, imports: undefined }
+    isCycleRoot = true
   }
 
   const bindings = new Map()
@@ -308,7 +368,8 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
         context: { ...context, format: result.format },
         excludeDefault: true,
         depth: depth + 1,
-        seen
+        seen,
+        cycleState
       })
 
       for (const binding of sub.bindings.values()) {
@@ -341,10 +402,18 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
     }
   }
 
-  return { bindings, origins: starOrigins }
+  return isCycleRoot && cycleState.imports !== undefined
+    ? { bindings, origins: starOrigins, cyclicImports: cycleState.imports }
+    : { bindings, origins: starOrigins }
 }
 
 function addIitm (url) {
+  if (url.indexOf('?') === -1) {
+    const hashIndex = url.indexOf('#')
+    return hashIndex === -1
+      ? `${url}?iitm=true`
+      : `${url.slice(0, hashIndex)}?iitm=true${url.slice(hashIndex)}`
+  }
   const urlObj = new URL(url)
   urlObj.searchParams.set('iitm', 'true')
   return urlObj.href
@@ -356,11 +425,124 @@ function addIitm (url) {
 export function createHook (meta) {
   /** @type {Map<string, SpecifierData>} */
   const specifiers = new Map()
+  let specifierParentTargetURL
+  let specifierParentURL
+  /** @type {Map<string, string> | undefined} */
+  let specifierParents
+  /** @type {Map<string, InitiatingImport[]> | undefined} */
+  let duplicateSpecifiers
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   let includeModules, excludeModules
   let shouldInclude = defaultShouldInclude
   let disableCjsSourceStripping = false
+  /** @type {Map<string, CyclicImportTargets> | undefined} */
+  let cyclicImportTargets
+
+  /**
+   * @param {string} url The resolved wrapper target URL.
+   * @param {string} parentURL The importing module URL.
+   */
+  function storeSpecifierParent (url, parentURL) {
+    if (specifierParentTargetURL === undefined && specifierParents === undefined) {
+      specifierParentTargetURL = url
+      specifierParentURL = parentURL
+      return
+    }
+    if (specifierParentTargetURL !== undefined) {
+      specifierParents = new Map([[specifierParentTargetURL, specifierParentURL]])
+      specifierParentTargetURL = undefined
+      specifierParentURL = undefined
+    }
+    specifierParents.set(url, parentURL)
+  }
+
+  /**
+   * @param {string} url The resolved wrapper target URL.
+   * @returns {string | undefined}
+   */
+  function takeSpecifierParent (url) {
+    if (url === specifierParentTargetURL) {
+      const parentURL = specifierParentURL
+      specifierParentTargetURL = undefined
+      specifierParentURL = undefined
+      return parentURL
+    }
+    const parentURL = specifierParents.get(url)
+    specifierParents.delete(url)
+    if (specifierParents.size === 0) specifierParents = undefined
+    return parentURL
+  }
+
+  /**
+   * @param {string} url The resolved wrapper target URL.
+   * @returns {InitiatingImport[] | undefined}
+   */
+  function takeDuplicateSpecifiers (url) {
+    const entries = duplicateSpecifiers?.get(url)
+    if (entries === undefined) return
+    duplicateSpecifiers.delete(url)
+    if (duplicateSpecifiers.size === 0) duplicateSpecifiers = undefined
+    return entries
+  }
+
+  /**
+   * @param {Map<string, Map<string, string>>} imports Cycle candidates grouped by importing module.
+   * @param {InitiatingImport} initiatingImport An import that initiated the wrapper.
+   * @param {string} rootURL The wrapped module URL.
+   */
+  function removeCyclicImport (imports, initiatingImport, rootURL) {
+    const targets = imports.get(initiatingImport.parentURL)
+    if (targets?.get(initiatingImport.specifier) !== rootURL) return
+    targets.delete(initiatingImport.specifier)
+    if (targets.size === 0) imports.delete(initiatingImport.parentURL)
+  }
+
+  /**
+   * @param {Map<string, Map<string, string>> | undefined} imports Cycle candidates grouped by importing module.
+   * @param {InitiatingImport | InitiatingImport[]} initiatingImports Imports that initiated the wrapper.
+   * @param {string} rootURL The wrapped module URL.
+   */
+  function mergeCyclicImports (imports, initiatingImports, rootURL) {
+    if (imports === undefined) return
+
+    if (Array.isArray(initiatingImports)) {
+      for (const initiatingImport of initiatingImports) removeCyclicImport(imports, initiatingImport, rootURL)
+    } else {
+      removeCyclicImport(imports, initiatingImports, rootURL)
+    }
+    if (imports.size === 0) return
+
+    cyclicImportTargets ??= new Map()
+    for (const [parentURL, newTargets] of imports) {
+      const targets = cyclicImportTargets.get(parentURL)
+      if (targets === undefined) {
+        cyclicImportTargets.set(parentURL, newTargets)
+        continue
+      }
+      for (const [specifier, targetURL] of newTargets) {
+        const previous = targets.get(specifier)
+        if (previous === undefined) {
+          targets.set(specifier, targetURL)
+        } else if (typeof previous === 'string') {
+          if (previous !== targetURL) targets.set(specifier, new Set([previous, targetURL]))
+        } else {
+          previous.add(targetURL)
+        }
+      }
+    }
+  }
+
+  /**
+   * @param {string} parentURL The importing module URL.
+   * @param {Map<string, CyclicImportTargets> | undefined} imports The captured cycle candidate registry.
+   * @param {CyclicImportTargets | undefined} targets The captured candidates for the importing module.
+   */
+  function clearCyclicImports (parentURL, imports, targets) {
+    if (imports?.get(parentURL) !== targets) return
+    imports.delete(parentURL)
+    if (imports === cyclicImportTargets && imports.size === 0) cyclicImportTargets = undefined
+  }
 
   // Track CJS module URLs that IITM has wrapped. On Node 24+, CJS modules loaded
   // via loadCJSModule (in an ESM import chain) have their require() calls for
@@ -462,7 +644,15 @@ export function createHook (meta) {
   // once the parent loader has turned the specifier into a resolved URL. The
   // only difference between the asynchronous and synchronous hooks is whether
   // that resolution was awaited, so all the wrapping decisions live here.
-  function finishResolve (result, specifier, context, parentURL) {
+  /**
+   * @param {{ url: string, format?: string }} result The resolved module.
+   * @param {string} specifier The original module specifier.
+   * @param {LoadContext} context The resolve context.
+   * @param {string} parentURL The importing module URL.
+   * @param {Map<string, CyclicImportTargets> | undefined} cyclicImports The captured cycle candidate registry.
+   * @param {CyclicImportTargets | undefined} cyclicTargets The captured candidates for the importing module.
+   */
+  function finishResolve (result, specifier, context, parentURL, cyclicImports, cyclicTargets) {
     // Do not wrap the entrypoint module. Many CLIs check whether they are the
     // "main" module (e.g. require.main === module). Wrapping changes how they
     // are evaluated, and can make them exit without doing anything.
@@ -471,6 +661,21 @@ export function createHook (meta) {
         return { url: result.url, format: 'commonjs' }
       }
       return result
+    }
+
+    let currentImports = cyclicImports
+    let currentTargets = cyclicTargets
+    if (cyclicImports === cyclicImportTargets) {
+      if (cyclicImports !== undefined) currentTargets = cyclicImports.get(parentURL)
+    } else {
+      currentImports = cyclicImportTargets
+      currentTargets = currentImports?.get(parentURL)
+    }
+    const target = currentTargets?.get(specifier)
+    if (target !== undefined) {
+      currentTargets.delete(specifier)
+      if (currentTargets.size === 0) clearCyclicImports(parentURL, currentImports, currentTargets)
+      if (typeof target === 'string' ? target === result.url : target.has(result.url)) return result
     }
 
     // Never wrap a module whose format we don't handle (e.g. json, wasm); this
@@ -537,6 +742,37 @@ export function createHook (meta) {
     const specifierData = result.format === 'module-typescript' || result.format === 'commonjs-typescript'
       ? { specifier, format: result.format }
       : specifier
+    const previousSpecifierData = specifiers.get(result.url)
+    if (previousSpecifierData === undefined) {
+      storeSpecifierParent(result.url, parentURL)
+    } else {
+      let entries = duplicateSpecifiers?.get(result.url)
+      if (entries === undefined) {
+        const previousSpecifier = typeof previousSpecifierData === 'string'
+          ? previousSpecifierData
+          : previousSpecifierData.specifier
+        const previousParentURL = takeSpecifierParent(result.url)
+        if (previousSpecifier === specifier && previousParentURL === parentURL) {
+          storeSpecifierParent(result.url, parentURL)
+        } else {
+          entries = [
+            { specifier: previousSpecifier, parentURL: previousParentURL },
+            { specifier, parentURL }
+          ]
+          duplicateSpecifiers ??= new Map()
+          duplicateSpecifiers.set(result.url, entries)
+        }
+      } else {
+        let duplicate = false
+        for (const entry of entries) {
+          if (entry.specifier === specifier && entry.parentURL === parentURL) {
+            duplicate = true
+            break
+          }
+        }
+        if (!duplicate) entries.push({ specifier, parentURL })
+      }
+    }
     specifiers.set(result.url, specifierData)
 
     return {
@@ -565,9 +801,21 @@ export function createHook (meta) {
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
     }
-    const result = await parentResolve(newSpecifier, context)
+    const cyclicImports = cyclicImportTargets
+    const cyclicTargets = cyclicImports?.get(parentURL)
+    let result
+    if (cyclicTargets === undefined) {
+      result = await parentResolve(newSpecifier, context)
+    } else {
+      try {
+        result = await parentResolve(newSpecifier, context)
+      } catch (error) {
+        clearCyclicImports(parentURL, cyclicImports, cyclicTargets)
+        throw error
+      }
+    }
 
-    return finishResolve(result, specifier, context, parentURL)
+    return finishResolve(result, specifier, context, parentURL, cyclicImports, cyclicTargets)
   }
 
   // Synchronous counterpart to `resolve`, for `module.registerHooks`. The
@@ -589,9 +837,21 @@ export function createHook (meta) {
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
     }
-    const result = nextResolve(newSpecifier, context)
+    const cyclicImports = cyclicImportTargets
+    const cyclicTargets = cyclicImports?.get(parentURL)
+    let result
+    if (cyclicTargets === undefined) {
+      result = nextResolve(newSpecifier, context)
+    } else {
+      try {
+        result = nextResolve(newSpecifier, context)
+      } catch (error) {
+        clearCyclicImports(parentURL, cyclicImports, cyclicTargets)
+        throw error
+      }
+    }
 
-    return finishResolve(result, specifier, context, parentURL)
+    return finishResolve(result, specifier, context, parentURL, cyclicImports, cyclicTargets)
   }
 
   /**
@@ -719,6 +979,8 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
         specifiers.delete(url)
         return parentGetSource(url, context)
       }
+      const duplicateEntries = takeDuplicateSpecifiers(realUrl)
+      const parentURL = duplicateEntries === undefined ? takeSpecifierParent(realUrl) : undefined
 
       let originalSpecifier = specifierData
       let processContext = context
@@ -728,11 +990,14 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       }
 
       try {
-        const { bindings } = await driveAsync(
+        const { bindings, cyclicImports } = await driveAsync(
           processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: parentGetSource }
         )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
+        const source = onWrapSuccess(realUrl, processContext, originalSpecifier, bindings)
+        const initiatingImports = duplicateEntries ?? { specifier: originalSpecifier, parentURL }
+        mergeCyclicImports(cyclicImports, initiatingImports, realUrl)
+        return { source }
       } catch (cause) {
         onWrapFailure(realUrl, cause)
         // Revert back to the non-iitm URL
@@ -759,6 +1024,8 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
         specifiers.delete(url)
         return nextLoad(url, context)
       }
+      const duplicateEntries = takeDuplicateSpecifiers(realUrl)
+      const parentURL = duplicateEntries === undefined ? takeSpecifierParent(realUrl) : undefined
 
       let originalSpecifier = specifierData
       let processContext = context
@@ -768,11 +1035,14 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       }
 
       try {
-        const { bindings } = driveSync(
+        const { bindings, cyclicImports } = driveSync(
           processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: nextLoad }
         )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
+        const source = onWrapSuccess(realUrl, processContext, originalSpecifier, bindings)
+        const initiatingImports = duplicateEntries ?? { specifier: originalSpecifier, parentURL }
+        mergeCyclicImports(cyclicImports, initiatingImports, realUrl)
+        return { source }
       } catch (cause) {
         onWrapFailure(realUrl, cause)
         url = realUrl
