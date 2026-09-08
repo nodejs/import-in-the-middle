@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.5.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.4.0...import-in-the-middle-v3.5.0) (2026-09-08)
+
+
+### Features
+
+* support es-module-lexer v3 ([#284](https://github.com/nodejs/import-in-the-middle/issues/284)) ([abdf356](https://github.com/nodejs/import-in-the-middle/commit/abdf35683a8f6f7ac120fb39f5607284f46669c6))
+
+
+### Performance Improvements
+
+* reduce ESM wrapper allocations ([#285](https://github.com/nodejs/import-in-the-middle/issues/285)) ([6275a12](https://github.com/nodejs/import-in-the-middle/commit/6275a1232c4441d7751a0701849dbb8745b6e223))
+
 ## [3.4.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.3.3...import-in-the-middle-v3.4.0) (2026-08-28)
 
 
