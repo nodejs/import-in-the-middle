@@ -8,6 +8,15 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue }
 
+export type JsonCompatible<Value> =
+  Value extends boolean | null | number | string
+    ? Value
+    : Value extends readonly unknown[]
+      ? { [Key in keyof Value]: JsonCompatible<Value[Key]> }
+      : Value extends object
+        ? { [Key in keyof Value]: JsonCompatible<Value[Key]> }
+        : never
+
 export type WrapperExport = {
   name: string
   url: string
@@ -18,12 +27,12 @@ export type PassthroughExports =
   | Iterable<string>
   | ((exports: readonly WrapperExport[]) => Iterable<string>)
 
-export type BundlerModule<Data extends JsonValue = JsonValue> = {
+export type BundlerModule<Data = JsonValue> = {
   url: string
   format: string
   specifier: string
   source?: WrapperSource
-  data?: Data
+  data?: JsonCompatible<Data>
   passthroughExports?: PassthroughExports
 }
 
@@ -61,7 +70,7 @@ export type WrapperModule = {
   sideEffects: true
 }
 
-export type CreateWrapperModuleOptions<Data extends JsonValue = JsonValue> = {
+export type CreateWrapperModuleOptions<Data = JsonValue> = {
   module: BundlerModule<Data>
   resolve: (
     specifier: string,
@@ -77,6 +86,6 @@ export type CreateWrapperModuleOptions<Data extends JsonValue = JsonValue> = {
  * EXPERIMENTAL
  * This API is experimental and may change in minor versions.
  */
-export declare function createWrapperModule<Data extends JsonValue = JsonValue>(
+export declare function createWrapperModule<Data = JsonValue>(
   options: CreateWrapperModuleOptions<Data>
 ): Promise<WrapperModule>

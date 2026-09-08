@@ -8,7 +8,7 @@ import { builtinModules } from 'module'
 import { readFileSync } from 'fs'
 import createGetNodeModuleFormat from './lib/get-node-module-format.js'
 import { driveSync, driveAsync } from './lib/io.mjs'
-import { buildCommonJSWrapperSource, buildWrapperSource, processModule } from './lib/wrapper.mjs'
+import { buildCommonJSWrapperSource, buildWrapperSource, processModule, sourceToString } from './lib/wrapper.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 
 // Re-exported for backwards compatibility: `supportsSyncHooks` now lives in its
@@ -22,6 +22,7 @@ const getNodeModuleFormat = createGetNodeModuleFormat(readFileSync)
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
 const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
+const DATA_JAVASCRIPT_RE = /^(?:application|text)\/javascript(?:[;,])/i
 // The `-typescript` formats are listed unconditionally; getExports strips the
 // types when the runtime supports it and otherwise falls back to onWrapFailure.
 const HANDLED_FORMATS = new Set([
@@ -32,6 +33,7 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 /** @typedef {import('node:module').LoadHookContext} LoadContext */
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
 /** @typedef {string | { specifier: string, format: 'module-typescript' | 'commonjs-typescript' }} SpecifierData */
+/** @typedef {{ specifier: string, format?: string, originalUrl: string }} RequireSpecifierData */
 
 function hasIitm (url) {
   // Fast path: avoid URL parsing on the hot path when there's clearly no iitm.
@@ -148,6 +150,16 @@ function addIitm (url) {
   const urlObj = new URL(url)
   urlObj.searchParams.set('iitm', 'true')
   return urlObj.href
+}
+
+/**
+ * @param {string} url
+ * @returns {boolean}
+ */
+function isJavaScriptUrl (url) {
+  const urlObj = new URL(url)
+  return urlObj.protocol === 'node:' || EXTENSION_RE.test(urlObj.pathname) ||
+    (urlObj.protocol === 'data:' && DATA_JAVASCRIPT_RE.test(urlObj.pathname))
 }
 
 /**
@@ -323,6 +335,10 @@ export function createHook (meta, commonjs) {
       return result
     }
 
+    if (result.format === undefined && !isJavaScriptUrl(result.url)) {
+      return result
+    }
+
     // If the file is referencing itself, we need to skip adding the iitm search params
     if (result.url === parentURL) {
       return {
@@ -396,8 +412,9 @@ export function createHook (meta, commonjs) {
       }
 
       commonJsSpecifiers ??= new Map()
-      commonJsSpecifiers.set(result.url, { specifier, format })
-      return result
+      const wrapperUrl = format === undefined && isJavaScriptUrl(result.url) ? addIitm(result.url) : result.url
+      commonJsSpecifiers.set(wrapperUrl, { specifier, format, originalUrl: result.url })
+      return wrapperUrl === result.url ? result : { ...result, url: wrapperUrl }
     }
   }
 
@@ -509,16 +526,44 @@ export function createHook (meta, commonjs) {
 
   /**
    * @param {string} url
+   * @param {LoadContext} context
    * @param {LoadResult} result
-   * @param {{ specifier: string, format?: string }} specifierData
+   * @param {RequireSpecifierData} specifierData
+   * @param {(url: string, context?: Partial<LoadContext>) => LoadResult} nextLoad
    * @returns {LoadResult}
    */
-  let wrapCommonJS
+  let wrapRequireLoad
   if (commonjs === true) {
-    wrapCommonJS = (url, result, specifierData) => {
-      commonJsSpecifiers.delete(url)
+    wrapRequireLoad = (url, context, result, specifierData, nextLoad) => {
       const format = result.format ?? specifierData.format
       let source = result.source
+
+      if (format === 'module' || format === 'module-typescript') {
+        const processContext = { ...context, format }
+        /**
+         * @param {string} loadUrl
+         * @param {Partial<LoadContext>} loadContext
+         * @returns {LoadResult}
+         */
+        const loadModule = (loadUrl, loadContext) => {
+          return loadUrl === url ? result : nextLoad(loadUrl, loadContext)
+        }
+        try {
+          const { bindings } = driveSync(
+            processModule({ srcUrl: url, context: processContext }),
+            { resolve: cachedResolve, load: loadModule }
+          )
+          return {
+            ...result,
+            format: 'module',
+            source: onWrapSuccess(url, processContext, specifierData.specifier, bindings),
+            shortCircuit: true
+          }
+        } catch (cause) {
+          onWrapFailure(url, cause)
+          return result
+        }
+      }
 
       if (url.startsWith('node:')) {
         source = `module.exports = process.getBuiltinModule(${JSON.stringify(url)})\n`
@@ -536,7 +581,7 @@ export function createHook (meta, commonjs) {
         if (format === 'commonjs-typescript') {
           const stripTypeScriptTypes = process.getBuiltinModule('module').stripTypeScriptTypes
           if (stripTypeScriptTypes !== undefined) {
-            source = stripTypeScriptTypes(Buffer.isBuffer(source) ? source.toString('utf8') : source, { mode: 'strip' })
+            source = stripTypeScriptTypes(sourceToString(source), { mode: 'strip' })
           }
         }
         return {
@@ -714,19 +759,20 @@ export function createHook (meta, commonjs) {
   let loadSyncCommonJS
   if (commonjs === true) {
     loadSyncCommonJS = (url, context, nextLoad) => {
-      if (hasIitm(url)) return loadSync(url, context, nextLoad)
-
       const specifierData = commonJsSpecifiers?.get(url)
       if (specifierData !== undefined) {
         let result
         try {
-          result = nextLoad(url, context)
+          result = nextLoad(specifierData.originalUrl, context)
         } catch (error) {
           commonJsSpecifiers.delete(url)
           throw error
         }
-        return wrapCommonJS(url, result, specifierData)
+        commonJsSpecifiers.delete(url)
+        return wrapRequireLoad(specifierData.originalUrl, context, result, specifierData, nextLoad)
       }
+
+      if (hasIitm(url)) return loadSync(url, context, nextLoad)
 
       return loadSync(url, context, nextLoad)
     }

@@ -1,4 +1,4 @@
-import Hook from '../../../index.js'
+import Hook from 'import-in-the-middle'
 import * as wrapped from './iitm-wrapper.mjs'
 
 /**

@@ -479,6 +479,18 @@ registerModuleWithData(hookedPackageUrl, 'some-external-module', { version: '2.0
 strictEqual(packageBaseDirectory, fileURLToPath(new URL('.', hookedPackageUrl)).slice(0, -1))
 packageHook.unhook()
 
+const scopedPackageUrl = new URL(
+  '../fixtures/node_modules/@scope/some-scoped-module/index.mjs',
+  import.meta.url
+).href
+let scopedPackageCalls = 0
+const scopedPackageHook = new Hook(['@scope/some-scoped-module'], () => {
+  scopedPackageCalls++
+})
+registerModuleWithData(scopedPackageUrl, '@scope/some-scoped-module', undefined)
+strictEqual(scopedPackageCalls, 1)
+scopedPackageHook.unhook()
+
 const packageInternalUrl = new URL('../fixtures/node_modules/some-external-module/sub.mjs', import.meta.url).href
 let packageInternalName
 const packageInternalHook = new Hook(['some-external-module'], { internals: true }, (exports, name) => {
@@ -511,6 +523,30 @@ const commonJsInternalHook = new Hook(['some-external-module'], { internals: tru
 })
 strictEqual(commonJsInternalName, join('some-external-module', 'sub.js'))
 commonJsInternalHook.unhook()
+
+const reloadFilename = join(fileURLToPath(new URL('../fixtures/', import.meta.url)), 'reload.cjs')
+const reloadUrl = pathToFileURL(reloadFilename).href
+registerCommonJS(reloadUrl, { exports: { value: 1 } }, 'reload', undefined)
+registerCommonJS(reloadUrl, { exports: { value: 2 } }, 'reload', undefined)
+registerCommonJS(reloadUrl, { exports: { value: 3 } }, 'reload', undefined)
+registerModuleWithData(reloadUrl, 'reload', undefined)
+const reloadCalls = []
+/**
+ * @param {{ value?: number }} exports The latest module exports.
+ * @param {string} name The canonical module URL.
+ * @param {string|undefined} baseDir The package directory.
+ * @param {unknown} data Consumer data associated with the module.
+ * @param {'module'|'commonjs'} format The module format.
+ */
+function captureReloadedValue (exports, name, baseDir, data, format) {
+  reloadCalls.push({ format, value: exports.value })
+}
+const reloadHook = new Hook([reloadFilename], captureReloadedValue)
+deepStrictEqual(reloadCalls, [
+  { format: 'commonjs', value: 3 },
+  { format: 'module', value: undefined }
+])
+reloadHook.unhook()
 
 let invalidFileUrlName
 const invalidFileUrlHook = new Hook((exports, name) => {
@@ -554,6 +590,48 @@ strictEqual(reexportWrapper.watchFiles.includes(packageUrl), true)
 strictEqual(reexportWrapper.watchFiles.includes(sourceWatchUrl), true)
 doesNotMatch(reexportWrapper.code, /from "file:/)
 match(reexportWrapper.code, /export \{ val \} from "\.\/__iitm_module_1__\.js"/)
+
+const repeatedReexportUrl = 'file:///virtual/repeated-reexport.mjs'
+const repeatedLeafUrl = 'file:///virtual/repeated-reexport-leaf.mjs'
+let repeatedResolveCalls = 0
+/**
+ * @param {string} specifier
+ * @param {{ parentURL: string }} context
+ */
+function resolveRepeatedReexport (specifier, context) {
+  strictEqual(specifier, repeatedLeafUrl)
+  strictEqual(context.parentURL, repeatedReexportUrl)
+  repeatedResolveCalls++
+  return { url: repeatedLeafUrl, format: 'module' }
+}
+
+/**
+ * @param {string} url
+ */
+function loadRepeatedReexport (url) {
+  strictEqual(url, repeatedLeafUrl)
+  return { format: 'module', source: 'export const first = 1, second = 2, third = 3' }
+}
+
+/**
+ * @param {ReadonlyArray<{ name: string }>} exports The resolved exports.
+ */
+function selectRepeatedExports (exports) {
+  return exports.map(({ name }) => name)
+}
+
+await createWrapperModule({
+  module: {
+    url: repeatedReexportUrl,
+    format: 'module',
+    source: "export { first, second, third } from './repeated-reexport-leaf.mjs'",
+    specifier: 'repeated-reexport',
+    passthroughExports: selectRepeatedExports
+  },
+  resolve: resolveRepeatedReexport,
+  load: loadRepeatedReexport
+})
+strictEqual(repeatedResolveCalls, 1)
 
 /**
  * @param {string} specifier

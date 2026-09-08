@@ -4,13 +4,20 @@ import { getNodeModuleFormat } from '../../bundler.js'
 import { createWrapperModule } from '../../bundler.mjs'
 
 const moduleUrl = new URL('../fixtures/something.mjs', import.meta.url).href
+
+interface WrapperData {
+  version: string
+  values: readonly ['value']
+}
+
+const data: WrapperData = { version: '1.0.0', values: ['value'] as const }
 const wrapper = await createWrapperModule({
   module: {
     url: moduleUrl,
     format: 'module',
     source: 'export const value = 42',
     specifier: './something.mjs',
-    data: { version: '1.0.0' },
+    data,
     passthroughExports: exports => exports.map(({ name }) => name)
   },
   resolve () {

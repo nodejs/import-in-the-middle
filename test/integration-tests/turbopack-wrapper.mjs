@@ -1,4 +1,5 @@
 import { readFile, rm, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { dirname, relative, sep } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 
@@ -16,6 +17,7 @@ const generatedNames = [
  * @returns {Promise<Awaited<ReturnType<typeof createWrapperModule>>>}
  */
 export async function prepareTurbopackWrapper (appDirectory, initialValue) {
+  const require = createRequire(`${appDirectory}/package.json`)
   const originalPath = `${appDirectory}/iitm-original.mjs`
   const wrapperPath = `${appDirectory}/iitm-wrapper.mjs`
   const originalSource = `export { live, increment } from './iitm-dependency.mjs'
@@ -41,7 +43,10 @@ export const stable = 42
 
   let code = wrapper.code
   for (const entry of wrapper.imports) {
-    const specifier = relativeImport(wrapperPath, entry.target.url)
+    const targetUrl = entry.kind === 'runtime'
+      ? pathToFileURL(require.resolve('import-in-the-middle/lib/bundler-runtime.js')).href
+      : entry.target.url
+    const specifier = relativeImport(wrapperPath, targetUrl)
     code = code.replaceAll(JSON.stringify(entry.specifier), JSON.stringify(specifier))
   }
   await writeFile(wrapperPath, code)

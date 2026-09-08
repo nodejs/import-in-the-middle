@@ -37,14 +37,22 @@ function isTurbopackSpecifier (specifier, baseDir) {
   if (!usingTurbopack) return false
 
   const specifierWithoutTurbopackHash = specifier.slice(0, specifier.lastIndexOf('-'))
-  return baseDir.endsWith(specifierWithoutTurbopackHash)
+  return baseDir.endsWith(specifierWithoutTurbopackHash.replaceAll('/', path.sep))
+}
+
+/**
+ * @param {string} specifier
+ * @param {string} baseDir
+ */
+function matchesPackageDirectory (specifier, baseDir) {
+  return baseDir.endsWith(specifier.replaceAll('/', path.sep)) || isTurbopackSpecifier(specifier, baseDir)
 }
 
 function addHook (hook, extendedHook = hook) {
   importHooks.push(hook)
   toHook.forEach(([name, namespace, specifier]) => hook(name, namespace, specifier))
   extendedHooks.set(hook, extendedHook)
-  for (const entry of toHookExtended) {
+  for (const entry of toHookExtended.values()) {
     const namespace = entry.module === undefined ? entry.namespace : entry.module.exports
     const replacement = extendedHook(entry.name, namespace, entry.specifier, entry.data, entry.format)
     if (entry.module !== undefined && replacement !== undefined) entry.module.exports = replacement
@@ -136,7 +144,7 @@ function callExtendedHook (hookFn, modules, internals, name, namespace, specifie
       } else if (matchArg === name) {
         if (!baseDir) {
           result = callExtendedHookFn(hookFn, namespace, name, baseDir, data, format)
-        } else if (baseDir.endsWith(specifiers.get(loadUrl)) || isTurbopackSpecifier(specifiers.get(loadUrl), baseDir)) {
+        } else if (matchesPackageDirectory(specifiers.get(loadUrl), baseDir)) {
           result = callExtendedHookFn(hookFn, namespace, name, baseDir, data, format)
         } else if (internals) {
           const internalPath = name + path.sep + path.relative(baseDir, filePath)
@@ -281,7 +289,7 @@ function Hook (modules, options, hookFn) {
           if (!baseDir) {
             // built-in module (or unexpected non file:// name?)
             callHookFn(hookFn, namespace, name, baseDir)
-          } else if (baseDir.endsWith(specifiers.get(loadUrl)) || isTurbopackSpecifier(specifiers.get(loadUrl), baseDir)) {
+          } else if (matchesPackageDirectory(specifiers.get(loadUrl), baseDir)) {
             // An import of the top-level module (e.g. `import 'ioredis'`).
             // Note: Slight behaviour difference from RITM. RITM uses
             // `require.resolve(name)` to see if filename is the module

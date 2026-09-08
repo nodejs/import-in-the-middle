@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, strictEqual, throws } from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import * as nodeModule from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -49,7 +49,8 @@ strictEqual(resolveAsRequire(import.meta.url, 'module', {
   parentURL: import.meta.url
 }).shortCircuit, true)
 strictEqual(resolveAsRequire('https://example.com/module').url, 'https://example.com/module')
-strictEqual(resolveAsRequire('file:///unknown.wasm').url, 'file:///unknown.wasm')
+const unknownWasmUrl = 'file:///unknown.wasm'
+strictEqual(resolveAsRequire(unknownWasmUrl).url, unknownWasmUrl)
 
 const filteredHook = createHook(hookMeta, true)
 filteredHook.applyOptions({ include: ['included'] })
@@ -74,7 +75,7 @@ try {
   const invalidPackageDirectory = fileURLToPath(new URL('.', invalidPackageUrl))
   process.getBuiltinModule('fs').mkdirSync(invalidPackageDirectory)
   writeFileSync(join(invalidPackageDirectory, 'package.json'), '{')
-  strictEqual(resolveAsRequire(invalidPackageUrl).url, invalidPackageUrl)
+  strictEqual(resolveAsRequire(invalidPackageUrl).url, `${invalidPackageUrl}?iitm=true`)
 } finally {
   rmSync(formatDirectory, { recursive: true, force: true })
 }
@@ -98,9 +99,24 @@ try {
   resolveAsRequire(typeScriptUrl, 'commonjs-typescript')
   const typeScript = lowLevelHook.loadSyncCommonJS(typeScriptUrl, {}, () => ({
     format: 'commonjs-typescript',
-    source: Buffer.from('const value: number = 43; module.exports = value')
+    source: new TextEncoder().encode('const value: number = 43; module.exports = value')
   }))
   match(typeScript.source, /module\.exports = value/)
+
+  const loadTimeModuleUrl = 'data:text/javascript,export%20const%20value%20%3D%2042'
+  const loadTimeResolution = resolveAsRequire(loadTimeModuleUrl)
+  let loadedUrl
+  const loadTimeModule = lowLevelHook.loadSyncCommonJS(loadTimeResolution.url, {}, url => {
+    loadedUrl = url
+    return {
+      format: 'module',
+      source: 'export const value = 42'
+    }
+  })
+  strictEqual(loadedUrl, loadTimeModuleUrl)
+  strictEqual(loadTimeModule.format, 'module')
+  match(loadTimeModule.source, /export \{ \$0 as value \}/)
+  match(loadTimeModule.source, /\nregister\(/)
 
   const skippedUrl = pathToFileURL(join(fallbackDirectory, 'skipped.cjs')).href
   resolveAsRequire(skippedUrl, 'builtin')
@@ -151,12 +167,110 @@ try {
 const commonJsUrl = new URL('../fixtures/something.js', import.meta.url)
 const commonJsTypeScriptUrl = new URL('../fixtures/typescript-cjs-hook.cts', import.meta.url)
 const esmUrl = new URL('../fixtures/something.mjs', import.meta.url)
+const loadTimeSpecifier = 'iitm-load-time-module'
+const loadTimeModuleUrl = 'data:text/javascript,export%20const%20value%20%3D%2042'
+const applicationJavaScriptUrl = 'data:application/javascript,export%20const%20value%20%3D%2042'
+const nativeFormatDirectory = mkdtempSync(join(tmpdir(), 'iitm-native-formats-'))
+const loadTimeJsonFilename = join(nativeFormatDirectory, 'load-time.json')
+const loadTimeJsonUrl = pathToFileURL(loadTimeJsonFilename).href
+const loadTimeWasmSpecifier = 'iitm-load-time-wasm'
+const loadTimeWasmFilename = join(nativeFormatDirectory, 'load-time.wasm')
+const loadTimeWasmUrl = pathToFileURL(loadTimeWasmFilename).href
+writeFileSync(loadTimeJsonFilename, '{"value":42}')
+writeFileSync(loadTimeWasmFilename, new Uint8Array([
+  0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+  0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
+  0x03, 0x02, 0x01, 0x00,
+  0x07, 0x0a, 0x01, 0x06, 0x61, 0x6e, 0x73, 0x77, 0x65, 0x72, 0x00, 0x00,
+  0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b
+]))
+
+/**
+ * @param {string} specifier
+ * @param {object} context
+ * @param {Function} nextResolve
+ * @returns {object}
+ */
+function resolveLoadTimeModule (specifier, context, nextResolve) {
+  if (specifier === loadTimeSpecifier || specifier === loadTimeModuleUrl) {
+    return { url: loadTimeModuleUrl, shortCircuit: true }
+  }
+  if (specifier === loadTimeWasmSpecifier) {
+    return { url: loadTimeWasmUrl, shortCircuit: true }
+  }
+  return nextResolve(specifier, context)
+}
+
+/**
+ * @param {string} url
+ * @param {object} context
+ * @param {Function} nextLoad
+ * @returns {object}
+ */
+function loadLoadTimeModule (url, context, nextLoad) {
+  if (url === loadTimeModuleUrl) {
+    return {
+      format: 'module',
+      source: 'export const value = 42',
+      shortCircuit: true
+    }
+  }
+  return nextLoad(url, context)
+}
+
+nodeModule.registerHooks({ resolve: resolveLoadTimeModule, load: loadLoadTimeModule })
 register({
   commonjs: true,
-  include: [commonJsUrl.href, commonJsTypeScriptUrl.href, esmUrl.href, 'fs', 'node:test']
+  include: [
+    commonJsUrl.href,
+    commonJsTypeScriptUrl.href,
+    esmUrl.href,
+    loadTimeSpecifier,
+    /^data:application\/javascript,/,
+    loadTimeJsonUrl,
+    loadTimeWasmSpecifier,
+    'fs',
+    'node:test'
+  ]
 })
 
-const require = createRequire(import.meta.url)
+const require = nodeModule.createRequire(import.meta.url)
+try {
+  deepStrictEqual(require(loadTimeJsonFilename), { value: 42 })
+  const wasmNamespace = await import(loadTimeWasmSpecifier)
+  strictEqual(wasmNamespace.answer(), 42)
+} finally {
+  rmSync(nativeFormatDirectory, { recursive: true, force: true })
+}
+let applicationJavaScriptHookCalls = 0
+/** @param {object} exports The wrapped ESM namespace. */
+function patchApplicationJavaScript (exports) {
+  applicationJavaScriptHookCalls++
+  exports.value = 43
+}
+const applicationJavaScriptHook = new Hook([applicationJavaScriptUrl], patchApplicationJavaScript)
+try {
+  const namespace = await import(applicationJavaScriptUrl)
+  strictEqual(namespace.value, 43)
+  strictEqual(applicationJavaScriptHookCalls, 1)
+} finally {
+  applicationJavaScriptHook.unhook()
+}
+let loadTimeHookCalls = 0
+/** @param {object} exports The wrapped ESM namespace. */
+function patchLoadTimeModule (exports) {
+  loadTimeHookCalls++
+  exports.value = 43
+}
+const loadTimeHook = new Hook([loadTimeSpecifier], patchLoadTimeModule)
+try {
+  const namespace = require(loadTimeSpecifier)
+  strictEqual(namespace.value, 43)
+  strictEqual(loadTimeHookCalls, 1)
+} finally {
+  loadTimeHook.unhook()
+}
+
 const commonJsFilename = fileURLToPath(commonJsUrl)
 const commonJsHook = new Hook([commonJsFilename], exports => ({
   value: exports(),
