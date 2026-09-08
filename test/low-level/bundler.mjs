@@ -1,4 +1,5 @@
 import { strictEqual, deepStrictEqual, match, doesNotMatch, rejects } from 'assert'
+import { spawnSync } from 'child_process'
 import { readFile, mkdir, mkdtemp, writeFile, rm } from 'fs/promises'
 import { createRequire } from 'module'
 import { tmpdir } from 'os'
@@ -13,8 +14,9 @@ const {
   createWrapperModule: createCommonJSWrapperModule,
   getNodeModuleFormat
 } = require('../../bundler.js')
-const { registerCommonJS, registerWithData } = require('../../lib/bundler-runtime.js')
+const { ModuleBinder, registerCommonJS, registerWithData } = require('../../lib/bundler-runtime.js')
 const moduleUrl = new URL('../fixtures/something.mjs', import.meta.url).href
+const reexportLeafUrl = new URL('../fixtures/reexport-same-source-leaf.mjs', import.meta.url).href
 const source = await readFile(new URL(moduleUrl), 'utf8')
 
 /**
@@ -22,6 +24,44 @@ const source = await readFile(new URL(moduleUrl), 'utf8')
  */
 function unexpectedIo () {
   throw new Error('I/O should not be used when source is provided')
+}
+
+/**
+ * @returns {never}
+ */
+function unexpectedPassthroughSelection () {
+  throw new Error('Unexpected passthrough export selection')
+}
+
+/**
+ * @param {ReadonlyArray<{ name: string, url: string, localName?: string }>} exports The resolved exports.
+ * @returns {string[]}
+ */
+function selectLiveExport (exports) {
+  deepStrictEqual(exports, [
+    { name: 'live', url: liveModuleUrl, localName: 'live' },
+    { name: 'stable', url: liveModuleUrl, localName: 'stable' },
+    { name: 'increment', url: liveModuleUrl, localName: 'increment' }
+  ])
+  return ['live']
+}
+
+/**
+ * @param {ReadonlyArray<{ name: string, url: string, localName?: string }>} exports The resolved star exports.
+ * @returns {string[]}
+ */
+function selectValExport (exports) {
+  deepStrictEqual(exports, [{ name: 'val', url: reexportLeafUrl, localName: 'val' }])
+  return exports.map(({ name }) => name)
+}
+
+/**
+ * @param {string} name The canonical module URL.
+ * @param {string} specifier The original import specifier.
+ * @param {unknown} data Consumer data associated with the module.
+ */
+function registerModuleWithData (name, specifier, data) {
+  registerWithData(name, new ModuleBinder({}), specifier, data)
 }
 
 const wrapper = await createCommonJSWrapperModule({
@@ -50,6 +90,20 @@ match(wrapper.code, /from "\.\/__iitm_module_0__\.js"/)
 match(wrapper.code, /\nregisterWithData\(/)
 match(wrapper.code, /\{"version":"1\.0\.0"\}\)/)
 doesNotMatch(wrapper.code, /from "file:/)
+
+const emptyPassthroughWrapper = await createWrapperModule({
+  module: {
+    url: moduleUrl,
+    format: 'module',
+    source,
+    specifier: './something.mjs',
+    data: { version: '1.0.0' },
+    passthroughExports: []
+  },
+  resolve: unexpectedIo,
+  load: unexpectedIo
+})
+deepStrictEqual(emptyPassthroughWrapper, wrapper)
 
 const formatDirectory = await mkdtemp(join(tmpdir(), 'iitm-bundler-format-'))
 try {
@@ -110,21 +164,150 @@ try {
   await rm(temporaryDirectory, { recursive: true, force: true })
 }
 
-const rebuilt = await createWrapperModule({
+const liveDirectory = await mkdtemp(join(tmpdir(), 'iitm-bundler-live-'))
+const liveSource = `export let live = 1
+export const stable = 2
+export function increment () { live++ }
+`
+const liveModuleUrl = `data:text/javascript,${encodeURIComponent(liveSource)}`
+const liveWrapper = await createWrapperModule({
   module: {
-    url: moduleUrl,
+    url: liveModuleUrl,
     format: 'module',
-    source: 'export const rebuilt = true',
-    specifier: './something.mjs'
+    source: liveSource,
+    specifier: 'iitm-live',
+    data: { live: true },
+    passthroughExports: selectLiveExport
   },
   resolve: unexpectedIo,
   load: unexpectedIo
 })
 
-match(rebuilt.code, /export \{ \$rebuilt as rebuilt \}/)
-match(rebuilt.code, /\nregister\(/)
-doesNotMatch(rebuilt.code, /registerWithData/)
-doesNotMatch(rebuilt.code, /\$foo/)
+match(liveWrapper.code, /export \{ live \} from "\.\/__iitm_module_0__\.js"/)
+doesNotMatch(liveWrapper.code, / as live/)
+
+let liveCode = liveWrapper.code
+for (const { specifier, target } of liveWrapper.imports) {
+  liveCode = liveCode.replaceAll(JSON.stringify(specifier), JSON.stringify(target.url))
+}
+try {
+  const liveWrapperUrl = pathToFileURL(join(liveDirectory, 'wrapper.mjs')).href
+  const liveRunnerUrl = pathToFileURL(join(liveDirectory, 'runner.mjs')).href
+  await writeFile(new URL(liveWrapperUrl), liveCode)
+  await writeFile(new URL(liveRunnerUrl), `import Hook from ${JSON.stringify(new URL('../../index.js', import.meta.url).href)}
+
+let hookedExports
+/** @param {Record<string, unknown>} exported The wrapper exports. */
+function hookLive (exported) {
+  hookedExports = exported
+  exported.live = 99
+  exported.stable = 43
+}
+
+const hook = new Hook(['iitm-live'], hookLive)
+const [wrapper, source] = await Promise.all([
+  import(${JSON.stringify(liveWrapperUrl)}),
+  import(${JSON.stringify(liveModuleUrl)})
+])
+const initial = [wrapper.live, wrapper.stable, hookedExports.live]
+const sameIncrement = wrapper.increment === source.increment
+wrapper.increment()
+console.log(JSON.stringify({
+  initial,
+  sameIncrement,
+  sourceLive: source.live,
+  wrapperLive: wrapper.live,
+  hookedLive: hookedExports.live
+}))
+hook.unhook()
+`)
+  const result = spawnSync(process.execPath, [fileURLToPath(liveRunnerUrl)], {
+    encoding: 'utf8',
+    env: { ...process.env, NODE_OPTIONS: '' }
+  })
+  strictEqual(result.status, 0, result.stderr)
+  deepStrictEqual(JSON.parse(result.stdout), {
+    initial: [1, 43, 1],
+    sameIncrement: true,
+    sourceLive: 2,
+    wrapperLive: 2,
+    hookedLive: 2
+  })
+} finally {
+  await rm(liveDirectory, { recursive: true, force: true })
+}
+
+const staticPassthroughWrapper = await createWrapperModule({
+  module: {
+    url: 'file:///virtual/static-passthrough.mjs',
+    format: 'module',
+    source: "export { live } from './unresolved.mjs'",
+    specifier: './static-passthrough.mjs',
+    passthroughExports: ['live']
+  },
+  resolve: unexpectedIo,
+  load: unexpectedIo
+})
+match(staticPassthroughWrapper.code, /export \{ live \} from "\.\/__iitm_module_0__\.js"/)
+
+await rejects(createWrapperModule({
+  module: {
+    url: 'file:///virtual/passthrough-error.mjs',
+    format: 'module',
+    source: 'export const value = 42',
+    specifier: './passthrough-error.mjs',
+    passthroughExports: unexpectedPassthroughSelection
+  },
+  resolve: unexpectedIo,
+  load: unexpectedIo
+}), {
+  message: 'Unexpected passthrough export selection'
+})
+
+const rebuiltSource = 'export const rebuilt = true'
+const rebuiltUrl = `data:text/javascript,${encodeURIComponent(rebuiltSource)}`
+const rebuilt = await createWrapperModule({
+  module: {
+    url: rebuiltUrl,
+    format: 'module',
+    source: rebuiltSource,
+    specifier: 'iitm-rebuilt'
+  },
+  resolve: unexpectedIo,
+  load: unexpectedIo
+})
+
+match(rebuilt.code, /export \{ \$0 as rebuilt \}/)
+match(rebuilt.code, /\nregisterWithData\(/)
+doesNotMatch(rebuilt.code, /\nregister\(/)
+doesNotMatch(rebuilt.code, /"foo"/)
+
+let rebuiltFormat
+/**
+ * @param {object} exported
+ * @param {string} name
+ * @param {string|undefined} baseDir
+ * @param {unknown} data
+ * @param {string} format
+ */
+function captureRebuiltFormat (exported, name, baseDir, data, format) {
+  strictEqual(exported.rebuilt, true)
+  strictEqual(name, 'iitm-rebuilt')
+  strictEqual(baseDir, undefined)
+  strictEqual(data, undefined)
+  rebuiltFormat = format
+}
+const rebuiltHook = new Hook(['iitm-rebuilt'], captureRebuiltFormat)
+try {
+  let rebuiltCode = rebuilt.code
+  for (const { specifier, target } of rebuilt.imports) {
+    rebuiltCode = rebuiltCode.replaceAll(JSON.stringify(specifier), JSON.stringify(target.url))
+  }
+  await import(`data:text/javascript,${encodeURIComponent(rebuiltCode)}`)
+  strictEqual(rebuiltFormat, 'module')
+} finally {
+  rebuiltHook.unhook()
+}
 
 /**
  * @param {string} url
@@ -155,7 +338,8 @@ const commonJsWrapper = await createWrapperModule({
     format: 'commonjs',
     source: '#!/usr/bin/env node\nmodule.exports = { value: 42 }\nreturn\nmodule.exports.unreachable = true',
     specifier: './something.js',
-    data: { version: '1.0.0' }
+    data: { version: '1.0.0' },
+    passthroughExports: unexpectedPassthroughSelection
   },
   resolve: unexpectedIo,
   load: unexpectedIo
@@ -273,7 +457,7 @@ const packageHook = new Hook(['some-external-module'], (exports, name, baseDir, 
   packageBaseDirectory = baseDir
   deepStrictEqual(data, { version: '2.0.0' })
 })
-registerWithData(hookedPackageUrl, {}, {}, {}, 'some-external-module', { version: '2.0.0' })
+registerModuleWithData(hookedPackageUrl, 'some-external-module', { version: '2.0.0' })
 strictEqual(packageBaseDirectory, fileURLToPath(new URL('.', hookedPackageUrl)).slice(0, -1))
 packageHook.unhook()
 
@@ -282,7 +466,7 @@ let packageInternalName
 const packageInternalHook = new Hook(['some-external-module'], { internals: true }, (exports, name) => {
   packageInternalName = name
 })
-registerWithData(packageInternalUrl, {}, {}, {}, 'some-external-module/sub', undefined)
+registerModuleWithData(packageInternalUrl, 'some-external-module/sub', undefined)
 strictEqual(packageInternalName, join('some-external-module', 'sub.mjs'))
 packageInternalHook.unhook()
 
@@ -300,15 +484,22 @@ registerCommonJS(
   './sub',
   undefined
 )
-strictEqual(commonJsPackageName, join('some-external-module', 'sub.js'))
+strictEqual(commonJsPackageName, undefined)
 commonJsPackageHook.unhook()
+
+let commonJsInternalName
+const commonJsInternalHook = new Hook(['some-external-module'], { internals: true }, (exports, name) => {
+  commonJsInternalName = name
+})
+strictEqual(commonJsInternalName, join('some-external-module', 'sub.js'))
+commonJsInternalHook.unhook()
 
 let invalidFileUrlName
 const invalidFileUrlHook = new Hook((exports, name) => {
   invalidFileUrlName = name
 })
 invalidFileUrlName = undefined
-registerWithData('file://%', {}, {}, {}, 'invalid', undefined)
+registerModuleWithData('file://%', 'invalid', undefined)
 strictEqual(invalidFileUrlName, 'file://%')
 invalidFileUrlHook.unhook()
 
@@ -329,7 +520,8 @@ const reexportWrapper = await createWrapperModule({
   module: {
     url: reexportUrl,
     format: 'module',
-    specifier: './reexport-same-source.mjs'
+    specifier: './reexport-same-source.mjs',
+    passthroughExports: selectValExport
   },
   resolve: resolveModule,
   load: loadModule
@@ -343,6 +535,7 @@ strictEqual(reexportWrapper.watchFiles.includes(reexportUrl), true)
 strictEqual(reexportWrapper.watchFiles.includes(packageUrl), true)
 strictEqual(reexportWrapper.watchFiles.includes(sourceWatchUrl), true)
 doesNotMatch(reexportWrapper.code, /from "file:/)
+match(reexportWrapper.code, /export \{ val \} from "\.\/__iitm_module_1__\.js"/)
 
 /**
  * @param {string} specifier
@@ -366,7 +559,7 @@ const commonJsReexportWrapper = await createWrapperModule({
   load: loadModule
 })
 
-match(commonJsReexportWrapper.code, /export \{ \$foo as foo \}/)
+match(commonJsReexportWrapper.code, /export \{ \$0 as foo \}/)
 doesNotMatch(commonJsReexportWrapper.code, /as default/)
 
 const quotedExportWrapper = await createWrapperModule({
@@ -380,7 +573,36 @@ const quotedExportWrapper = await createWrapperModule({
   load: unexpectedIo
 })
 
-match(quotedExportWrapper.code, /export \{ \$quoted_name as "quoted name" \}/)
+match(quotedExportWrapper.code, /export \{ \$0 as "quoted name" \}/)
+
+const quotedPassthroughWrapper = await createWrapperModule({
+  module: {
+    url: 'file:///virtual/quoted-passthrough.mjs',
+    format: 'module',
+    source: 'const value = 42; export { value as "quoted name" }',
+    specifier: './quoted-passthrough.mjs',
+    passthroughExports: ['quoted name', 'missing']
+  },
+  resolve: unexpectedIo,
+  load: unexpectedIo
+})
+
+match(quotedPassthroughWrapper.code, /export \{ "quoted name" \} from "\.\/__iitm_module_0__\.js"/)
+doesNotMatch(quotedPassthroughWrapper.code, /missing/)
+
+const defaultPassthroughWrapper = await createWrapperModule({
+  module: {
+    url: 'file:///virtual/default-passthrough.mjs',
+    format: 'module',
+    source: 'export default 42',
+    specifier: './default-passthrough.mjs',
+    passthroughExports: ['default']
+  },
+  resolve: unexpectedIo,
+  load: unexpectedIo
+})
+
+match(defaultPassthroughWrapper.code, /export \{ default \} from "\.\/__iitm_module_0__\.js"/)
 
 /**
  * @param {string} specifier

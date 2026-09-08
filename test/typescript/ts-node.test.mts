@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import defaultHook, { Hook, addHook } from '../../index.js'
+import defaultHook, { Hook, addHook, removeHook } from '../../index.js'
 import { sayHi } from '../fixtures/say-hi.mjs'
 
 addHook((url, exported) => {
@@ -8,12 +8,18 @@ addHook((url, exported) => {
   }
 })
 
-new defaultHook((exported: any, name: string, baseDir: string|void)  => {
+new defaultHook(() => {})
+new Hook(() => {})
 
-});
+function checkHookExportTypes () {
+  const callableHook = new Hook((exported: (value: string) => string) => exported('test'))
+  callableHook.unhook()
 
-new Hook((exported: any, name: string, baseDir: string|void)  => {
+  const primitiveHook = (url: string, exported: number) => exported + url.length
+  addHook(primitiveHook)
+  removeHook(primitiveHook)
+}
 
-});
+void checkHookExportTypes
 
 assert.equal(sayHi('test'), 'Hooked')

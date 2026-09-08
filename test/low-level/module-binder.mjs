@@ -64,6 +64,25 @@ function interceptTimeouts () {
   strictEqual(slot.value, 99, 'flush does not clobber an overridden value')
 }
 
+// Read-only bindings retain the source value and ignore hook writes.
+{
+  const source = { foo: 42 }
+  const binder = new ModuleBinder(source, undefined, undefined, undefined, ['foo'])
+  strictEqual(binder.namespace.foo, 42)
+  strictEqual(binder.write('foo', 99), true)
+  strictEqual(binder.namespace.foo, 42)
+  source.foo = 43
+  strictEqual(binder.namespace.foo, 43)
+}
+
+// Read-only bindings can use the defining namespace for star re-exports.
+{
+  const source = { foo: 1 }
+  const definingSource = { foo: 2 }
+  const binder = new ModuleBinder(source, undefined, undefined, undefined, ['foo'], [definingSource])
+  strictEqual(binder.namespace.foo, 2)
+}
+
 // useFallback reads source.default when the named export is missing.
 {
   const source = { default: 7 }

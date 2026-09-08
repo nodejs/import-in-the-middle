@@ -1,81 +1,56 @@
-import { spawn, execSync } from 'child_process'
-import { existsSync } from 'fs'
-import { strictEqual } from 'assert'
-import { fileURLToPath } from 'url'
-import path from 'path'
+import { deepStrictEqual } from 'node:assert/strict'
+import { execFileSync, execSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const appDir = path.resolve(__dirname, '..', 'fixtures', 'test-nextjs-app')
-const iitmDir = path.resolve(__dirname, '..', '..')
-const hookSetup = path.join(appDir, 'iitm-hook-setup.cjs')
-const nextBin = path.join(appDir, 'node_modules', '.bin', 'next')
-const PORT = 3100
+import { runTurbopackServer } from './turbopack-server.mjs'
+import { prepareTurbopackWrapper, removeTurbopackWrapper } from './turbopack-wrapper.mjs'
 
-if (!existsSync(path.join(appDir, 'node_modules'))) {
+const directory = path.dirname(fileURLToPath(import.meta.url))
+const appDirectory = path.resolve(directory, '..', 'fixtures', 'test-nextjs-app')
+const iitmDirectory = path.resolve(directory, '..', '..')
+const hookSetup = path.join(appDirectory, 'iitm-hook-setup.cjs')
+const nextBin = path.join(appDirectory, 'node_modules', '.bin', 'next')
+const port = 3100
+
+if (!existsSync(path.join(appDirectory, 'node_modules'))) {
   console.log('Installing Next.js app dependencies')
-  execSync('npm install', { cwd: appDir })
+  execSync('npm install', { cwd: appDirectory })
 }
 
-console.log('Running `next build`')
-await new Promise((resolve, reject) => {
-  const build = spawn(nextBin, ['build'], {
-    cwd: appDir,
-    env: { ...process.env, NODE_OPTIONS: '' }
-  })
-  build.on('error', reject)
-  build.on('close', code => {
-    if (code === 0) resolve()
-    else reject(new Error(`next build exited with code ${code}`))
-  })
-})
-
-const hookTriggered = await new Promise((resolve, reject) => {
-  console.log(`Starting Next.js server on port ${PORT} via \`next start\``)
-  const server = spawn(nextBin, ['start', '--port', String(PORT)], {
-    cwd: appDir,
-    env: {
-      ...process.env,
-      NODE_OPTIONS: `--no-warnings --experimental-loader ${path.join(iitmDir, 'hook.mjs')} --require ${hookSetup}`,
-      IITM_PATH: path.join(iitmDir, 'index.js')
-    }
+await prepareTurbopackWrapper(appDirectory, 41)
+try {
+  console.log('Running `next build --turbopack`')
+  execFileSync(nextBin, ['build', '--turbopack'], {
+    cwd: appDirectory,
+    env: { ...process.env, NODE_OPTIONS: '' },
+    stdio: 'inherit'
   })
 
-  let output = ''
-  let hookSeen = false
-  let requestMade = false
+  console.log(`Starting Next.js server on port ${port} via \`next start\``)
+  await runTurbopackServer({
+    appDirectory,
+    arguments: ['start', '--port', String(port)],
+    hookSetup,
+    iitmDirectory,
+    nextBin,
+    port
+  }, verifyRoute)
+} finally {
+  await removeTurbopackWrapper(appDirectory)
+}
 
-  function onData (chunk) {
-    const text = chunk.toString()
-    output += text
-
-    if (!requestMade && /ready/i.test(text)) {
-      requestMade = true
-      console.log('Server is ready, hitting /api/foo')
-      fetch(`http://localhost:${PORT}/api/foo`).catch(() => {})
-    }
-
-    if (!hookSeen && output.includes('IITM_HOOK_TRIGGERED:camelcase')) {
-      hookSeen = true
-      server.kill()
-      resolve(true)
-    }
-  }
-
-  server.stdout.on('data', onData)
-  server.stderr.on('data', onData)
-  server.on('error', reject)
-  server.on('close', () => {
-    if (!hookSeen) {
-      reject(new Error(`Hook was not triggered. Output:\n${output}`))
-    }
+/**
+ * @param {string} url The application route URL.
+ * @returns {Promise<void>}
+ */
+async function verifyRoute (url) {
+  const response = await fetch(url)
+  deepStrictEqual(await response.json(), {
+    initialLive: 41,
+    live: 42,
+    stable: 43,
+    hookedLive: 42
   })
-
-  setTimeout(() => {
-    if (!hookSeen) {
-      server.kill()
-      reject(new Error(`Timed out waiting for hook. Output:\n${output}`))
-    }
-  }, 30_000)
-})
-
-strictEqual(hookTriggered, true)
+}

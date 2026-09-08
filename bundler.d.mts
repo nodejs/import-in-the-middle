@@ -8,12 +8,23 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue }
 
+export type WrapperExport = {
+  name: string
+  url: string
+  localName?: string
+}
+
+export type PassthroughExports =
+  | Iterable<string>
+  | ((exports: readonly WrapperExport[]) => Iterable<string>)
+
 export type BundlerModule<Data extends JsonValue = JsonValue> = {
   url: string
   format: string
   specifier: string
   source?: WrapperSource
   data?: Data
+  passthroughExports?: PassthroughExports
 }
 
 export type ModuleContext = {

@@ -138,7 +138,7 @@ function callExtendedHook (hookFn, modules, internals, name, namespace, specifie
           result = callExtendedHookFn(hookFn, namespace, name, baseDir, data, format)
         } else if (baseDir.endsWith(specifiers.get(loadUrl)) || isTurbopackSpecifier(specifiers.get(loadUrl), baseDir)) {
           result = callExtendedHookFn(hookFn, namespace, name, baseDir, data, format)
-        } else if (internals || format === 'commonjs') {
+        } else if (internals) {
           const internalPath = name + path.sep + path.relative(baseDir, filePath)
           result = callExtendedHookFn(hookFn, namespace, internalPath, baseDir, data, format)
         }

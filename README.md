@@ -123,7 +123,7 @@ Bundlers can generate ESM and CommonJS wrappers with
 import { createWrapperModule } from 'import-in-the-middle/bundler.mjs'
 
 const wrapper = await createWrapperModule({
-  module: { url, format, source, specifier, data },
+  module: { url, format, source, specifier, data, passthroughExports },
   resolve,
   load
 })
@@ -145,6 +145,16 @@ module graph.
 The optional `data` value must be JSON-serializable. It is embedded in the
 wrapper and passed as the fourth argument to `Hook` callbacks, allowing package
 metadata needed by instrumentation to reach the bundled runtime.
+
+`passthroughExports` identifies ESM exports that must keep their original live
+bindings. It accepts an iterable of names or a selector that receives all
+resolved exports after IITM loads the module graph. Each resolved export has
+the public `name`, the defining module `url`, and its `localName` when it has a
+local ESM binding. IITM emits direct re-exports for selected names and exposes
+their current values to `Hook` callbacks. Assignments from a callback do not
+replace these bindings. Other exports remain patchable. This option has no
+effect on CommonJS modules, and names that the module does not export are
+ignored.
 
 The result contains generated `code`, an `imports` manifest, `watchFiles`, and
 `sideEffects: true`. The code imports only relative placeholder specifiers. The

@@ -10,7 +10,8 @@ const wrapper = await createWrapperModule({
     format: 'module',
     source: 'export const value = 42',
     specifier: './something.mjs',
-    data: { version: '1.0.0' }
+    data: { version: '1.0.0' },
+    passthroughExports: exports => exports.map(({ name }) => name)
   },
   resolve () {
     throw new Error('Unexpected resolve')

@@ -5,9 +5,9 @@ import { builtinModules } from 'module'
 import { driveAsync } from './lib/io.mjs'
 import {
   buildCommonJSWrapperSource,
-  buildWrapperSource,
   buildWrapperSourceWithData,
-  processModule
+  processModule,
+  resolveExportBindings
 } from './lib/wrapper.mjs'
 
 const RUNTIME_SPECIFIER = './__iitm_runtime__.js'
@@ -21,6 +21,11 @@ const runtimeUrl = new URL('./lib/bundler-runtime.js', import.meta.url).href
  * @property {string} specifier
  * @property {string | ArrayBuffer | ArrayBufferView} [source]
  * @property {unknown} [data]
+ * @property {Iterable<string> | ((exports: ReadonlyArray<{
+ *   name: string,
+ *   url: string,
+ *   localName?: string
+ * }>) => Iterable<string>)} [passthroughExports]
  */
 
 /**
@@ -154,10 +159,30 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
     }
   }
 
-  const { bindings } = await driveAsync(
-    processModule({ srcUrl: moduleData.url, context }),
-    { resolve: resolveModule, load: loadModule }
-  )
+  const io = { resolve: resolveModule, load: loadModule }
+  const selectPassthroughExports = typeof moduleData.passthroughExports === 'function'
+    ? moduleData.passthroughExports
+    : undefined
+  const moduleExportsCache = selectPassthroughExports === undefined ? undefined : new Map()
+  const { bindings } = await driveAsync(processModule({
+    srcUrl: moduleData.url,
+    context,
+    moduleExportsCache
+  }), io)
+  let selectedPassthroughExports = moduleData.passthroughExports
+  if (selectPassthroughExports !== undefined) {
+    const exportNames = Array.isArray(bindings) ? bindings.slice() : Array.from(bindings.keys())
+    const exports = await driveAsync(resolveExportBindings({
+      srcUrl: moduleData.url,
+      context,
+      exportNames,
+      moduleExportsCache
+    }), io)
+    selectedPassthroughExports = selectPassthroughExports(exports)
+  }
+  const passthroughExports = selectedPassthroughExports === undefined
+    ? undefined
+    : new Set(selectedPassthroughExports)
 
   /** @type {WrapperImport[]} */
   const imports = [{
@@ -193,22 +218,15 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
     return specifier
   }
 
-  const code = moduleData.data === undefined
-    ? buildWrapperSource({
-      realUrl: moduleData.url,
-      bindings,
-      originalSpecifier: moduleData.specifier,
-      runtimeSpecifier: RUNTIME_SPECIFIER,
-      mapImport
-    })
-    : buildWrapperSourceWithData({
-      realUrl: moduleData.url,
-      bindings,
-      originalSpecifier: moduleData.specifier,
-      data: moduleData.data,
-      runtimeSpecifier: RUNTIME_SPECIFIER,
-      mapImport
-    })
+  const code = buildWrapperSourceWithData({
+    realUrl: moduleData.url,
+    bindings,
+    originalSpecifier: moduleData.specifier,
+    data: moduleData.data,
+    runtimeSpecifier: RUNTIME_SPECIFIER,
+    mapImport,
+    passthroughExports
+  })
 
   return {
     code,
