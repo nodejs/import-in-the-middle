@@ -8,7 +8,12 @@ import { builtinModules } from 'module'
 import { readFileSync } from 'fs'
 import createGetNodeModuleFormat from './lib/get-node-module-format.js'
 import { driveSync, driveAsync } from './lib/io.mjs'
-import { buildCommonJSWrapperSource, buildWrapperSource, processModule, sourceToString } from './lib/wrapper.mjs'
+import {
+  buildCommonJSWrapperSource,
+  buildWrapperSourceWithData,
+  processModule,
+  sourceToString
+} from './lib/wrapper.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 
 // Re-exported for backwards compatibility: `supportsSyncHooks` now lives in its
@@ -500,10 +505,11 @@ export function createHook (meta, commonjs) {
     if (context.format === 'commonjs') {
       cjsInIitmChain.add(realUrl)
     }
-    return buildWrapperSource({
+    return buildWrapperSourceWithData({
       realUrl,
       bindings,
       originalSpecifier,
+      data: undefined,
       runtimeSpecifier: iitmURL
     })
   }

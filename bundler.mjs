@@ -71,7 +71,8 @@ const runtimeUrl = new URL('./lib/bundler-runtime.js', import.meta.url).href
  *   code: string,
  *   imports: WrapperImport[],
  *   watchFiles: string[],
- *   sideEffects: true
+ *   sideEffects: true,
+ *   sourceLineOffset?: number
  * }>}
  */
 export async function createWrapperModule ({ module: moduleData, resolve, load }) {
@@ -158,7 +159,8 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
         external: false
       }],
       watchFiles: Array.from(watchFiles),
-      sideEffects: true
+      sideEffects: true,
+      sourceLineOffset: 1
     }
   }
 

@@ -68,6 +68,7 @@ export type WrapperModule = {
   imports: WrapperImport[]
   watchFiles: string[]
   sideEffects: true
+  sourceLineOffset?: number
 }
 
 export type CreateWrapperModuleOptions<Data = JsonValue> = {

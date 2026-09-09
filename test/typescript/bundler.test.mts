@@ -29,5 +29,6 @@ const wrapper = await createWrapperModule({
 })
 
 assert.equal(wrapper.sideEffects, true)
+assert.equal(wrapper.sourceLineOffset, undefined)
 assert.equal(wrapper.imports[0].kind, 'runtime')
 assert.equal(getNodeModuleFormat(moduleUrl), 'module')

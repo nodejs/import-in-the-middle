@@ -116,7 +116,7 @@ try {
   strictEqual(loadedUrl, loadTimeModuleUrl)
   strictEqual(loadTimeModule.format, 'module')
   match(loadTimeModule.source, /export \{ \$0 as value \}/)
-  match(loadTimeModule.source, /\nregister\(/)
+  match(loadTimeModule.source, /\nregisterWithData\(/)
 
   const skippedUrl = pathToFileURL(join(fallbackDirectory, 'skipped.cjs')).href
   resolveAsRequire(skippedUrl, 'builtin')
@@ -132,7 +132,7 @@ try {
     format: 'commonjs',
     source: 'module.exports = 45'
   }))
-  match(chainLoad.source, /\nregister\(/)
+  match(chainLoad.source, /\nregisterWithData\(/)
   const child = { url: pathToFileURL(join(fallbackDirectory, 'child.cjs')).href, format: 'commonjs' }
   strictEqual(chainHook.resolveSyncCommonJS('child', {
     conditions: ['require'],
@@ -294,10 +294,21 @@ strictEqual(require(commonJsTypeScriptFilename).epsilon, 6)
 commonJsTypeScriptHook.unhook()
 
 const esmFilename = fileURLToPath(esmUrl)
-const esmHook = new Hook([esmFilename], exports => {
+let esmFormat
+/**
+ * @param {object} exports The wrapped ESM namespace.
+ * @param {string} name The module name.
+ * @param {string|undefined} baseDir The package directory.
+ * @param {unknown} data Consumer data associated with the module.
+ * @param {'module'|'commonjs'|undefined} format The module format.
+ */
+function patchEsm (exports, name, baseDir, data, format) {
   exports.foo = 43
-})
+  esmFormat = format
+}
+const esmHook = new Hook([esmFilename], patchEsm)
 strictEqual(require(esmFilename).foo, 43)
+strictEqual(esmFormat, 'module')
 esmHook.unhook()
 
 const marker = Symbol('iitm-commonjs')

@@ -165,6 +165,10 @@ the manifest, so filesystem paths, virtual IDs, external modules, and cache
 invalidation remain owned by the bundler. `watchFiles` are file URLs that the
 adapter converts to its native watch-dependency format.
 
+CommonJS results also contain `sourceLineOffset`. It specifies the number of
+generated lines before the original source. The source starts at column zero,
+so an adapter can shift an existing source map without parsing the wrapper.
+
 The runtime import in the manifest must be bundled with the wrapper. Keeping it
 external can create a second hook registry at runtime. It is CommonJS and must
 go through the bundler's normal CommonJS transform.

@@ -77,6 +77,7 @@ const wrapper = await createCommonJSWrapperModule({
 })
 
 strictEqual(wrapper.sideEffects, true)
+strictEqual(wrapper.sourceLineOffset, undefined)
 deepStrictEqual(wrapper.watchFiles, [moduleUrl])
 strictEqual(wrapper.imports.length, 2)
 strictEqual(wrapper.imports[0].specifier, './__iitm_runtime__.js')
@@ -365,7 +366,8 @@ const commonJsWrapper = await createWrapperModule({
 
 strictEqual(commonJsWrapper.imports.length, 1)
 strictEqual(commonJsWrapper.imports[0].kind, 'runtime')
-match(commonJsWrapper.code, /^\(function \(\) \{/)
+strictEqual(commonJsWrapper.sourceLineOffset, 1)
+match(commonJsWrapper.code, /^\(function \(\) \{\n\/\/\/usr\/bin\/env node\n/)
 match(commonJsWrapper.code, /registerCommonJS/)
 doesNotMatch(commonJsWrapper.code, /^(?:import|export) /m)
 doesNotMatch(commonJsWrapper.code, /function \(exports, require, module/)
