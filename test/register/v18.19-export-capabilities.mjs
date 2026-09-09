@@ -1,4 +1,4 @@
-import { register } from 'node:module'
+import { register, syncBuiltinESMExports } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { rejects, strictEqual, throws } from 'node:assert/strict'
 
@@ -81,6 +81,17 @@ new Hook(['fs'], { replaceExports: [] }, namespace => {
   throws(() => { namespace.readFile = undefined }, { name: 'TypeError' })
 })
 
+// eslint-disable-next-line no-new
+new Hook(['fs'], { replaceExports: ['F_OK'] }, namespace => {
+  if ('F_OK' in namespace) namespace.F_OK = 1234
+})
+
+// eslint-disable-next-line no-new
+new Hook(['path'], { replaceExports: ['sep'] }, namespace => {
+  namespace.sep = 'hooked separator'
+  throws(() => { namespace.delimiter = undefined }, { name: 'TypeError' })
+})
+
 // Node.js 23 and later expose this marker on CommonJS namespaces.
 // eslint-disable-next-line no-new
 new Hook([commonJsPath], { replaceExports: [] }, namespace => {
@@ -108,6 +119,21 @@ strictEqual(reexport.val, 1)
 
 const fs = await import('node:fs')
 strictEqual(typeof fs.readFile, 'function')
+if ('F_OK' in fs.default) strictEqual(fs.F_OK, 1234)
+const originalReadFile = fs.default.readFile
+const replacementReadFile = () => {}
+try {
+  fs.default.readFile = replacementReadFile
+  syncBuiltinESMExports()
+  strictEqual(fs.readFile, replacementReadFile)
+} finally {
+  fs.default.readFile = originalReadFile
+  syncBuiltinESMExports()
+}
+
+const path = await import('node:path')
+strictEqual(path.sep, 'hooked separator')
+strictEqual(typeof path.join, 'function')
 
 const commonJs = await import(commonJsUrl)
 strictEqual(commonJs.foo, 'something')

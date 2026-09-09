@@ -61,6 +61,7 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
  * @typedef {object} ProcessResult
  * @property {string[] | Map<string, string | StarBinding>} bindings
  * @property {Map<string, string> | undefined} origins
+ * @property {ReadonlySet<string>} [nonEnumerableExportNames]
  */
 
 function hasIitm (url) {
@@ -248,13 +249,13 @@ function shouldExcludeExport (name, sourceUrl) {
  * for a module with no `export *`.
  */
 function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen }) {
-  const { exportNames, starReexports } = yield * getExports(srcUrl, context)
+  const { exportNames, nonEnumerableExportNames, starReexports } = yield * getExports(srcUrl, context)
 
   // Most modules have no export star. Keep that path array-backed so it pays
   // neither merge bookkeeping nor a Map lookup for each direct export.
   if (starReexports === undefined) {
     if (!excludeDefault) {
-      return { bindings: exportNames, origins: undefined }
+      return { bindings: exportNames, origins: undefined, nonEnumerableExportNames }
     }
 
     const bindings = []
@@ -262,7 +263,7 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
       if (shouldExcludeExport(name, srcUrl)) continue
       bindings.push(name)
     }
-    return { bindings, origins: undefined }
+    return { bindings, origins: undefined, nonEnumerableExportNames }
   }
 
   const bindings = new Map()
@@ -365,7 +366,7 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
 }
 
 function addIitm (url) {
-  const urlObj = new URL(url)
+  const urlObj = new URL(url.startsWith('node:') ? `file:///${url}` : url)
   urlObj.searchParams.set('iitm', 'true')
   return urlObj.href
 }
@@ -640,6 +641,11 @@ export function createHook (meta, listenForHookCapabilities) {
       return result
     }
 
+    // A co-resident IITM loader owns an already-wrapped builtin URL.
+    if (result.url.startsWith('file:///node:') && hasIitm(result.url)) {
+      return result
+    }
+
     const turbopackSpecifier = registeredHookCapabilities === undefined
       ? undefined
       : getTurbopackSpecifier(specifier, result.url)
@@ -758,9 +764,18 @@ export function createHook (meta, listenForHookCapabilities) {
    * @param {string} originalSpecifier The specifier used to import the module.
    * @param {ReadonlySet<string> | undefined} replaceExports Export bindings hooks can replace.
    * @param {LoadContext['format']} format The wrapped module format.
+   * @param {ReadonlySet<string> | undefined} nonEnumerableExportNames Non-enumerable builtin exports.
    */
-  function buildWrapperSource (realUrl, bindings, originalSpecifier, replaceExports, format) {
+  function buildWrapperSource (
+    realUrl,
+    bindings,
+    originalSpecifier,
+    replaceExports,
+    format,
+    nonEnumerableExportNames
+  ) {
     const isEsm = format === 'module' || format === 'module-typescript'
+    const isBuiltin = format === 'builtin'
     if (isEsm && replaceExports?.size === 0 && shouldReexport('module.exports', realUrl)) {
       const hasDefault = bindings instanceof Map ? bindings.has('default') : bindings.includes('default')
       return `
@@ -785,6 +800,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
     let bindingNames = ''
     let bindingSources
     let exportSpecifiers = ''
+    let passthroughDeclarations = ''
     let passthroughNames = ''
     let passthroughExportGroups
     let passthroughImportSpecifiers = ''
@@ -794,7 +810,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
     let passthroughIndex = 0
     let writeCases = ''
     let index = 0
-    let canUseImportedBindings = replaceExports !== undefined
+    let canUseImportedBindings = isEsm && replaceExports !== undefined
     for (const binding of bindings.values()) {
       const directName = typeof binding === 'string' ? binding : undefined
       const name = directName ?? binding.name
@@ -813,11 +829,12 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       }
       const objectKey = JSON.stringify(name)
       const exportName = name === 'default' ? name : objectKey
+      const sourceName = isBuiltin && nonEnumerableExportNames?.has(name) ? `${namespaceName}.default` : namespaceName
       if (replaceExports !== undefined && !replaceExports.has(name)) {
-        const passthroughVariableName = `$p${passthroughIndex}`
         if (name === 'module.exports') {
           canUseImportedBindings = false
-        } else {
+        } else if (isEsm) {
+          const passthroughVariableName = `$p${passthroughIndex}`
           passthroughImportSpecifiers += passthroughImportSpecifiers === ''
             ? `${exportName} as ${passthroughVariableName}`
             : `, ${exportName} as ${passthroughVariableName}`
@@ -825,17 +842,23 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
             ? `${passthroughVariableName} as ${exportName}`
             : `, ${passthroughVariableName} as ${exportName}`
           passthroughReadCases += `    case ${passthroughIndex}: return ${passthroughVariableName}\n`
+        } else if (!isBuiltin || sourceName !== namespaceName) {
+          const passthroughVariableName = `$p${passthroughIndex}`
+          passthroughDeclarations += `const ${passthroughVariableName} = ${sourceName}[${objectKey}]\n`
+          passthroughExportSpecifiers += passthroughExportSpecifiers === ''
+            ? `${passthroughVariableName} as ${exportName}`
+            : `, ${passthroughVariableName} as ${exportName}`
         }
         passthroughNames += passthroughNames === '' ? objectKey : `, ${objectKey}`
         if (passthroughSources !== undefined) passthroughSources += ', '
-        if (namespaceName !== 'namespace') {
+        if (sourceName !== 'namespace') {
           passthroughSources ??= 'undefined, '.repeat(passthroughIndex)
-          passthroughSources += namespaceName
+          passthroughSources += sourceName
         } else if (passthroughSources !== undefined) {
           passthroughSources += 'undefined'
         }
         passthroughIndex++
-        if (shouldReexport(name, realUrl)) {
+        if (isEsm && shouldReexport(name, realUrl)) {
           passthroughExportGroups ??= new Map()
           const exportNames = passthroughExportGroups.get(sourceSpecifier)
           passthroughExportGroups.set(
@@ -851,9 +874,9 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       declarationNames += declarationNames === '' ? variableName : `, ${variableName}`
       bindingNames += bindingNames === '' ? objectKey : `, ${objectKey}`
       if (bindingSources !== undefined) bindingSources += ', '
-      if (namespaceName !== 'namespace') {
+      if (sourceName !== 'namespace') {
         bindingSources ??= 'undefined, '.repeat(index)
-        bindingSources += namespaceName
+        bindingSources += sourceName
       } else if (bindingSources !== undefined) {
         bindingSources += 'undefined'
       }
@@ -898,7 +921,14 @@ const __binder = new ModuleBinder(namespace, [${bindingNames}], __write${binding
   : `${bindingSources === undefined ? ', undefined' : ''}, [${passthroughNames}]${passthroughSourceArguments}`})
 `
     const reexports = exportSpecifiers === '' ? '' : `export { ${exportSpecifiers} }\n`
+    const builtinReexports = isBuiltin
+      ? `export * from ${JSON.stringify(realUrl)}\n${replaceExports !== undefined && !replaceExports.has('default')
+          ? `export { default } from ${JSON.stringify(realUrl)}\n`
+          : ''}`
+      : ''
     if (useImportedBindings) {
+      passthroughReexports = `export { ${passthroughExportSpecifiers} }\n`
+    } else if (!isEsm && passthroughExportSpecifiers !== '') {
       passthroughReexports = `export { ${passthroughExportSpecifiers} }\n`
     }
 
@@ -906,8 +936,10 @@ const __binder = new ModuleBinder(namespace, [${bindingNames}], __write${binding
 import { register, ModuleBinder } from ${JSON.stringify(iitmURL)}
 ${moduleImport}
 ${originImports}
+${passthroughDeclarations}
 ${binder}
 ${reexports}
+${builtinReexports}
 ${passthroughReexports}
 
 __binder.flush()
@@ -924,14 +956,29 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
    * @param {string} originalSpecifier The original import specifier.
    * @param {string[] | Map<string, string | StarBinding>} bindings Its exported bindings.
    * @param {ReadonlySet<string> | undefined} replaceExports Export bindings hooks can replace.
+   * @param {ReadonlySet<string> | undefined} nonEnumerableExportNames Non-enumerable builtin exports.
    */
-  function onWrapSuccess (realUrl, context, originalSpecifier, bindings, replaceExports) {
+  function onWrapSuccess (
+    realUrl,
+    context,
+    originalSpecifier,
+    bindings,
+    replaceExports,
+    nonEnumerableExportNames
+  ) {
     specifiers.delete(realUrl)
     // context.format is set to 'commonjs' by getCjsExports during processModule.
     if (context.format === 'commonjs') {
       cjsInIitmChain.add(realUrl)
     }
-    return buildWrapperSource(realUrl, bindings, originalSpecifier, replaceExports, context.format)
+    return buildWrapperSource(
+      realUrl,
+      bindings,
+      originalSpecifier,
+      replaceExports,
+      context.format,
+      nonEnumerableExportNames
+    )
   }
 
   // Bookkeeping shared by the async and sync wrap paths when `processModule`
@@ -976,11 +1023,20 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       }
 
       try {
-        const { bindings } = await driveAsync(
+        const { bindings, nonEnumerableExportNames } = await driveAsync(
           processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: parentGetSource }
         )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings, replaceExports) }
+        return {
+          source: onWrapSuccess(
+            realUrl,
+            processContext,
+            originalSpecifier,
+            bindings,
+            replaceExports,
+            nonEnumerableExportNames
+          )
+        }
       } catch (cause) {
         onWrapFailure(realUrl, cause)
         // Revert back to the non-iitm URL
@@ -1020,11 +1076,20 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       }
 
       try {
-        const { bindings } = driveSync(
+        const { bindings, nonEnumerableExportNames } = driveSync(
           processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: nextLoad }
         )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings, replaceExports) }
+        return {
+          source: onWrapSuccess(
+            realUrl,
+            processContext,
+            originalSpecifier,
+            bindings,
+            replaceExports,
+            nonEnumerableExportNames
+          )
+        }
       } catch (cause) {
         onWrapFailure(realUrl, cause)
         url = realUrl
