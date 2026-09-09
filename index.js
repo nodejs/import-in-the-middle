@@ -14,39 +14,73 @@ if (!isBuiltin) {
 
 const {
   importHooks,
+  registerHookCapability,
+  removeHookCapability,
+  replayHookCapabilities,
   specifiers,
   toHook
 } = require('./lib/register')
+const getTurbopackSpecifier = require('./lib/turbopack')
 
 /**
- * Checks turbopack specifiers separately (for Next.js 16+).
- *
- * If turbopack is used, specifiers will have an additional hash appended to the end.
- * Something like "ai" might become "ai-5e7181a616786b24". This only happens in Next.js 16+.
- * Just checking if the baseDir ends with this new specifier won't match, as the baseDir still has the plain package.
- *
- * This logic isolates a new check for checking the actual name in the case turbopack is being used.
- *
- * @param specifier {string}
- * @param baseDir {string}
+ * @typedef {object} HookCapability
+ * @property {number} id
+ * @property {string[] | undefined} modules
+ * @property {ReadonlyArray<string> | undefined} replaceExports
+ */
+/** @typedef {{ id: number, removed: true }} HookCapabilityRemoval */
+/** @type {WeakMap<Function, HookCapability[]>} */
+const hookCapabilities = new WeakMap()
+
+/**
+ * @param {string} specifier
+ * @param {string} baseDir
+ * @returns {boolean}
  */
 function isTurbopackSpecifier (specifier, baseDir) {
-  const usingTurbopack = process.env.TURBOPACK ?? process.argv.includes('--turbo')
-  if (!usingTurbopack) return false
-
-  const specifierWithoutTurbopackHash = specifier.slice(0, specifier.lastIndexOf('-'))
-  return baseDir.endsWith(specifierWithoutTurbopackHash)
+  const turbopackSpecifier = getTurbopackSpecifier(specifier)
+  return turbopackSpecifier !== undefined && baseDir.endsWith(turbopackSpecifier)
 }
 
-function addHook (hook) {
+/**
+ * @param {(name: string, namespace: object, specifier: string) => void} hook
+ * @param {HookCapability} capability
+ */
+function addHookInternal (hook, capability) {
   importHooks.push(hook)
-  toHook.forEach(([name, namespace, specifier]) => hook(name, namespace, specifier))
+  const capabilities = hookCapabilities.get(hook)
+  if (capabilities === undefined) {
+    hookCapabilities.set(hook, [capability])
+  } else {
+    capabilities.push(capability)
+  }
+  try {
+    toHook.forEach(([name, namespace, specifier]) => hook(name, namespace, specifier))
+  } catch (error) {
+    removeHook(hook)
+    throw error
+  }
+}
+
+/**
+ * @param {(name: string, namespace: object, specifier: string) => void} hook
+ * @returns {void}
+ */
+function addHook (hook) {
+  const capability = registerHookCapability(undefined, undefined)
+  sendHookCapabilityToLoader(capability)
+  addHookInternal(hook, capability)
 }
 
 function removeHook (hook) {
   const index = importHooks.indexOf(hook)
   if (index > -1) {
     importHooks.splice(index, 1)
+    const capabilities = hookCapabilities.get(hook)
+    const capability = capabilities.shift()
+    if (capabilities.length === 0) hookCapabilities.delete(hook)
+    const removal = removeHookCapability(capability)
+    sendHookCapabilityToLoader(removal)
   }
 }
 
@@ -63,6 +97,32 @@ function callHookFn (hookFn, namespace, name, baseDir) {
 }
 
 let sendModulesToLoader
+
+/**
+ * @param {HookCapability | HookCapabilityRemoval} update
+ */
+function sendHookCapabilityToLoader (update) {
+  if (!sendModulesToLoader) return
+  sendModulesToLoader(update)
+}
+
+/**
+ * @param {object | null} options
+ * @returns {ReadonlyArray<string> | undefined}
+ */
+function getReplaceExports (options) {
+  const replaceExports = options?.replaceExports
+  if (replaceExports === undefined) return
+  if (!Array.isArray(replaceExports)) {
+    throw new TypeError("The 'replaceExports' option must be an array of export names")
+  }
+  for (let index = 0; index < replaceExports.length; index++) {
+    if (typeof replaceExports[index] !== 'string') {
+      throw new TypeError("The 'replaceExports' option must be an array of export names")
+    }
+  }
+  return replaceExports.slice()
+}
 
 /**
  * EXPERIMENTAL
@@ -128,6 +188,8 @@ function createAddHookMessageChannel () {
   const addHookMessagePort = port2
   const registerOptions = { data: { addHookMessagePort, include: [] }, transferList: [addHookMessagePort] }
 
+  replayHookCapabilities(sendHookCapabilityToLoader)
+
   return { registerOptions, addHookMessagePort, waitForAllMessagesAcknowledged }
 }
 
@@ -142,10 +204,14 @@ function Hook (modules, options, hookFn) {
     options = null
   }
   const internals = options ? options.internals === true : false
+  const replaceExports = getReplaceExports(options)
 
-  if (sendModulesToLoader && Array.isArray(modules)) {
-    sendModulesToLoader(modules)
+  if (internals && replaceExports !== undefined) {
+    throw new Error("The 'replaceExports' option is incompatible with the 'internals' option")
   }
+
+  const capability = registerHookCapability(Array.isArray(modules) ? modules : undefined, replaceExports)
+  sendHookCapabilityToLoader(capability)
 
   this._iitmHook = (name, namespace, specifier) => {
     const loadUrl = name
@@ -207,7 +273,7 @@ function Hook (modules, options, hookFn) {
     }
   }
 
-  addHook(this._iitmHook)
+  addHookInternal(this._iitmHook, capability)
 }
 
 Hook.prototype.unhook = function () {

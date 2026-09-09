@@ -7,6 +7,7 @@ import { inspect } from 'util'
 import { builtinModules } from 'module'
 import { getExports } from './lib/get-exports.mjs'
 import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
+import getTurbopackSpecifier from './lib/turbopack.js'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 
 // Re-exported for backwards compatibility: `supportsSyncHooks` now lives in its
@@ -35,8 +36,27 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 
 /** @typedef {import('node:module').LoadHookContext} LoadContext */
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
-/** @typedef {string | { specifier: string, format: 'module-typescript' | 'commonjs-typescript' }} SpecifierData */
+/**
+ * @typedef {string | {
+ *   specifier: string,
+ *   format?: 'module-typescript' | 'commonjs-typescript',
+ *   replaceExports?: ReadonlySet<string>
+ * }} SpecifierData
+ */
 /** @typedef {{ name: string, origin: string }} StarBinding */
+/**
+ * @typedef {object} HookCapability
+ * @property {number | undefined} id
+ * @property {string[] | undefined} modules
+ * @property {ReadonlyArray<string> | undefined} replaceExports
+ */
+/**
+ * @typedef {object} RegisteredHookCapability
+ * @property {number | undefined} id
+ * @property {string[] | undefined} modules
+ * @property {ReadonlySet<string> | undefined} replaceExports
+ */
+/** @typedef {{ id: number, removed: true }} HookCapabilityRemoval */
 /**
  * @typedef {object} ProcessResult
  * @property {string[] | Map<string, string | StarBinding>} bindings
@@ -352,13 +372,18 @@ function addIitm (url) {
 
 /**
  * @param {{ url: string }} meta
+ * @param {(listener: (capability: {
+ *   modules: string[] | undefined,
+ *   replaceExports: ReadonlyArray<string> | undefined
+ * }) => void) => void} [listenForHookCapabilities]
  */
-export function createHook (meta) {
+export function createHook (meta, listenForHookCapabilities) {
   /** @type {Map<string, SpecifierData>} */
   const specifiers = new Map()
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   let includeModules, excludeModules
+  let includeHookCapabilities = false
   let shouldInclude = defaultShouldInclude
   let disableCjsSourceStripping = false
 
@@ -369,6 +394,134 @@ export function createHook (meta) {
   // of the native CJS module value (e.g. EventEmitter constructor), breaking
   // patterns like `class App extends require('events') {}`.
   const cjsInIitmChain = new Set()
+  /** @type {RegisteredHookCapability[] | undefined} */
+  let registeredHookCapabilities
+  let hasExplicitHookCapabilities = false
+
+  /**
+   * @param {HookCapability} capability
+   * @returns {string[] | undefined}
+   */
+  function registerHookCapability (capability) {
+    let modules
+    if (capability.modules !== undefined) {
+      modules = capability.modules.slice()
+      for (const each of capability.modules) {
+        if (!each.startsWith('node:') && builtinModules.includes(each)) {
+          modules.push(`node:${each}`)
+        }
+      }
+    }
+
+    const replaceExports = capability.replaceExports === undefined
+      ? undefined
+      : new Set(capability.replaceExports)
+    if (replaceExports !== undefined) hasExplicitHookCapabilities = true
+    registeredHookCapabilities ??= []
+    registeredHookCapabilities.push({ id: capability.id, modules, replaceExports })
+    return modules
+  }
+
+  /**
+   * @param {number} id
+   */
+  function removeHookCapability (id) {
+    let index = -1
+    if (registeredHookCapabilities !== undefined) {
+      for (let i = 0; i < registeredHookCapabilities.length; i++) {
+        if (registeredHookCapabilities[i].id === id) {
+          index = i
+          break
+        }
+      }
+    }
+    if (index === -1) return
+    registeredHookCapabilities.splice(index, 1)
+    hasExplicitHookCapabilities = false
+    for (const capability of registeredHookCapabilities) {
+      if (capability.replaceExports !== undefined) {
+        hasExplicitHookCapabilities = true
+        break
+      }
+    }
+  }
+
+  /**
+   * @param {HookCapability | HookCapabilityRemoval} update
+   * @returns {string[] | undefined}
+   */
+  function applyHookCapabilityUpdate (update) {
+    if ('removed' in update) {
+      removeHookCapability(update.id)
+      return
+    }
+    return registerHookCapability(update)
+  }
+
+  /**
+   * @param {string[] | undefined} modules
+   * @param {string} url
+   * @param {string} specifier
+   * @param {string | undefined} resultPath
+   * @param {string | undefined} turbopackSpecifier
+   * @returns {boolean}
+   */
+  function matchesHookCapability (modules, url, specifier, resultPath, turbopackSpecifier) {
+    if (modules === undefined || modules.includes(specifier) || modules.includes(url)) return true
+    return (turbopackSpecifier !== undefined && modules.includes(turbopackSpecifier)) ||
+      (resultPath !== undefined && modules.includes(resultPath))
+  }
+
+  /**
+   * @param {string} url
+   * @param {string} specifier
+   * @param {string | undefined} resultPath
+   * @param {string | undefined} turbopackSpecifier
+   * @returns {boolean}
+   */
+  function matchesAnyHookCapability (url, specifier, resultPath, turbopackSpecifier) {
+    if (registeredHookCapabilities === undefined) return false
+    for (const capability of registeredHookCapabilities) {
+      if (matchesHookCapability(capability.modules, url, specifier, resultPath, turbopackSpecifier)) return true
+    }
+    return false
+  }
+
+  /**
+   * @param {string} url
+   * @param {string} specifier
+   * @param {string | undefined} turbopackSpecifier
+   * @returns {ReadonlySet<string> | undefined}
+   */
+  function getReplaceExports (url, specifier, turbopackSpecifier) {
+    if (!hasExplicitHookCapabilities) return
+
+    let resultPath
+    if (url.startsWith('file:')) {
+      resultPath = fileURLToPath(url)
+    }
+
+    let matched = false
+    let replaceExports
+    for (const capability of registeredHookCapabilities) {
+      if (!matchesHookCapability(capability.modules, url, specifier, resultPath, turbopackSpecifier)) continue
+      if (capability.replaceExports === undefined) return
+
+      matched = true
+      if (replaceExports === undefined) {
+        replaceExports = capability.replaceExports
+      } else {
+        const merged = new Set(replaceExports)
+        for (const name of capability.replaceExports) merged.add(name)
+        replaceExports = merged
+      }
+    }
+    return matched ? replaceExports : undefined
+  }
+
+  if (listenForHookCapabilities !== undefined) {
+    listenForHookCapabilities(applyHookCapabilityUpdate)
+  }
 
   // Default matcher, used unless the consumer supplies its own `shouldInclude`
   // (see applyOptions). It applies the include/exclude lists, so finishResolve
@@ -378,7 +531,7 @@ export function createHook (meta) {
   // node_modules, and the full file URL for non-bare specifier imports (relative
   // paths would be error prone). An absolute path entry added via Hook over the
   // message port matches the resolved file path, so it is resolved here.
-  function defaultShouldInclude (url, specifier) {
+  function defaultShouldInclude (url, specifier, turbopackSpecifier) {
     let resultPath
     if (url.startsWith('file:')) {
       const stackTraceLimit = Error.stackTraceLimit
@@ -396,7 +549,8 @@ export function createHook (meta) {
       return each === specifier || each === url || (resultPath && each === resultPath)
     }
 
-    if (includeModules && !includeModules.some(match)) {
+    if (includeModules && !includeModules.some(match) &&
+      (!includeHookCapabilities || !matchesAnyHookCapability(url, specifier, resultPath, turbopackSpecifier))) {
       return false
     }
 
@@ -428,18 +582,12 @@ export function createHook (meta) {
     }
 
     if (data.addHookMessagePort) {
-      data.addHookMessagePort.on('message', (modules) => {
-        if (includeModules === undefined) {
-          includeModules = []
-        }
-
-        for (const each of modules) {
-          if (!each.startsWith('node:') && builtinModules.includes(each)) {
-            includeModules.push(`node:${each}`)
-          }
-
-          includeModules.push(each)
-        }
+      includeHookCapabilities = true
+      data.addHookMessagePort.on('message', (message) => {
+        const update = Array.isArray(message)
+          ? { modules: message, replaceExports: undefined }
+          : message
+        applyHookCapabilityUpdate(update)
 
         data.addHookMessagePort.postMessage('ack')
       }).unref()
@@ -492,9 +640,13 @@ export function createHook (meta) {
       return result
     }
 
-    // `shouldInclude` is always set (the include/exclude list matcher by default,
-    // a consumer-provided predicate otherwise), so no nullish check is needed.
-    if (!shouldInclude(result.url, specifier)) {
+    const turbopackSpecifier = registeredHookCapabilities === undefined
+      ? undefined
+      : getTurbopackSpecifier(specifier, result.url)
+    const included = shouldInclude === defaultShouldInclude
+      ? defaultShouldInclude(result.url, specifier, turbopackSpecifier)
+      : shouldInclude(result.url, specifier)
+    if (!included) {
       return result
     }
 
@@ -534,9 +686,13 @@ export function createHook (meta) {
     }
 
     // Preserve the format before an outer loader can normalize it.
-    const specifierData = result.format === 'module-typescript' || result.format === 'commonjs-typescript'
-      ? { specifier, format: result.format }
-      : specifier
+    const replaceExports = getReplaceExports(result.url, specifier, turbopackSpecifier)
+    let specifierData = specifier
+    if (result.format === 'module-typescript' || result.format === 'commonjs-typescript') {
+      specifierData = { specifier, format: result.format, replaceExports }
+    } else if (replaceExports !== undefined) {
+      specifierData = { specifier, replaceExports }
+    }
     specifiers.set(result.url, specifierData)
 
     return {
@@ -600,8 +756,24 @@ export function createHook (meta) {
    * @param {string} realUrl The URL of the wrapped module.
    * @param {string[] | Map<string, string | StarBinding>} bindings Its exported bindings.
    * @param {string} originalSpecifier The specifier used to import the module.
+   * @param {ReadonlySet<string> | undefined} replaceExports Export bindings hooks can replace.
+   * @param {LoadContext['format']} format The wrapped module format.
    */
-  function buildWrapperSource (realUrl, bindings, originalSpecifier) {
+  function buildWrapperSource (realUrl, bindings, originalSpecifier, replaceExports, format) {
+    const isEsm = format === 'module' || format === 'module-typescript'
+    if (isEsm && replaceExports?.size === 0 && shouldReexport('module.exports', realUrl)) {
+      const hasDefault = bindings instanceof Map ? bindings.has('default') : bindings.includes('default')
+      return `
+import { register, ModuleBinder } from ${JSON.stringify(iitmURL)}
+import * as namespace from ${JSON.stringify(realUrl)}
+export * from ${JSON.stringify(realUrl)}
+${hasDefault ? `export { default } from ${JSON.stringify(realUrl)}\n` : ''}
+const __binder = ModuleBinder.readOnly(namespace)
+
+register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifier)})
+`
+    }
+
     // The wrapped module imports its namespace as `namespace`, which serves
     // every export but the ones a same-origin `export *` collision forced onto
     // their defining module (#171): the aggregate namespace drops those as
@@ -613,13 +785,23 @@ export function createHook (meta) {
     let bindingNames = ''
     let bindingSources
     let exportSpecifiers = ''
+    let passthroughNames = ''
+    let passthroughExportGroups
+    let passthroughImportSpecifiers = ''
+    let passthroughExportSpecifiers = ''
+    let passthroughReadCases = ''
+    let passthroughSources
+    let passthroughIndex = 0
     let writeCases = ''
     let index = 0
+    let canUseImportedBindings = replaceExports !== undefined
     for (const binding of bindings.values()) {
       const directName = typeof binding === 'string' ? binding : undefined
       const name = directName ?? binding.name
       let namespaceName = 'namespace'
+      let sourceSpecifier = realUrl
       if (directName === undefined) {
+        canUseImportedBindings = false
         originNamespaces ??= new Map()
         namespaceName = originNamespaces.get(binding.origin)
         if (namespaceName === undefined) {
@@ -627,9 +809,45 @@ export function createHook (meta) {
           originNamespaces.set(binding.origin, namespaceName)
           originImports += `import * as ${namespaceName} from ${JSON.stringify(binding.origin)}\n`
         }
+        sourceSpecifier = binding.origin
       }
-      const variableName = `$${index}`
       const objectKey = JSON.stringify(name)
+      const exportName = name === 'default' ? name : objectKey
+      if (replaceExports !== undefined && !replaceExports.has(name)) {
+        const passthroughVariableName = `$p${passthroughIndex}`
+        if (name === 'module.exports') {
+          canUseImportedBindings = false
+        } else {
+          passthroughImportSpecifiers += passthroughImportSpecifiers === ''
+            ? `${exportName} as ${passthroughVariableName}`
+            : `, ${exportName} as ${passthroughVariableName}`
+          passthroughExportSpecifiers += passthroughExportSpecifiers === ''
+            ? `${passthroughVariableName} as ${exportName}`
+            : `, ${passthroughVariableName} as ${exportName}`
+          passthroughReadCases += `    case ${passthroughIndex}: return ${passthroughVariableName}\n`
+        }
+        passthroughNames += passthroughNames === '' ? objectKey : `, ${objectKey}`
+        if (passthroughSources !== undefined) passthroughSources += ', '
+        if (namespaceName !== 'namespace') {
+          passthroughSources ??= 'undefined, '.repeat(passthroughIndex)
+          passthroughSources += namespaceName
+        } else if (passthroughSources !== undefined) {
+          passthroughSources += 'undefined'
+        }
+        passthroughIndex++
+        if (shouldReexport(name, realUrl)) {
+          passthroughExportGroups ??= new Map()
+          const exportNames = passthroughExportGroups.get(sourceSpecifier)
+          passthroughExportGroups.set(
+            sourceSpecifier,
+            exportNames === undefined ? exportName : `${exportNames}, ${exportName}`
+          )
+        }
+        continue
+      }
+
+      canUseImportedBindings = false
+      const variableName = `$${index}`
       declarationNames += declarationNames === '' ? variableName : `, ${variableName}`
       bindingNames += bindingNames === '' ? objectKey : `, ${objectKey}`
       if (bindingSources !== undefined) bindingSources += ', '
@@ -641,14 +859,33 @@ export function createHook (meta) {
       }
       writeCases += `    case ${index++}: ${variableName} = value; break\n`
       if (shouldReexport(name, realUrl)) {
-        const exportName = name === 'default' ? name : objectKey
         exportSpecifiers += exportSpecifiers === ''
           ? `${variableName} as ${exportName}`
           : `, ${variableName} as ${exportName}`
       }
     }
+    const passthroughSourceArguments = passthroughSources === undefined ? '' : `, [${passthroughSources}]`
+    let passthroughReexports = ''
+    if (passthroughExportGroups !== undefined) {
+      for (const [sourceSpecifier, exportNames] of passthroughExportGroups) {
+        passthroughReexports += `export { ${exportNames} } from ${JSON.stringify(sourceSpecifier)}\n`
+      }
+    }
+    const useImportedBindings = canUseImportedBindings && passthroughNames !== ''
+    const moduleImport = useImportedBindings
+      ? `import { ${passthroughImportSpecifiers} } from ${JSON.stringify(realUrl)}`
+      : `import * as namespace from ${JSON.stringify(realUrl)}`
     const binder = declarationNames === ''
-      ? 'const __binder = new ModuleBinder(namespace)\n'
+      ? passthroughNames === ''
+        ? 'const __binder = new ModuleBinder(namespace)\n'
+        : useImportedBindings
+          ? `function __read (index) {
+  switch (index) {
+${passthroughReadCases}  }
+}
+const __binder = new ModuleBinder(undefined, undefined, undefined, undefined, [${passthroughNames}], undefined, __read)
+`
+          : `const __binder = new ModuleBinder(namespace, undefined, undefined, undefined, [${passthroughNames}]${passthroughSourceArguments})\n`
       : `let ${declarationNames}
 function __write (index, value) {
   switch (index) {
@@ -656,16 +893,22 @@ ${writeCases}  }
 }
 const __binder = new ModuleBinder(namespace, [${bindingNames}], __write${bindingSources === undefined
   ? ''
-  : `, [${bindingSources}]`})
+  : `, [${bindingSources}]`}${passthroughNames === ''
+  ? ''
+  : `${bindingSources === undefined ? ', undefined' : ''}, [${passthroughNames}]${passthroughSourceArguments}`})
 `
     const reexports = exportSpecifiers === '' ? '' : `export { ${exportSpecifiers} }\n`
+    if (useImportedBindings) {
+      passthroughReexports = `export { ${passthroughExportSpecifiers} }\n`
+    }
 
     return `
 import { register, ModuleBinder } from ${JSON.stringify(iitmURL)}
-import * as namespace from ${JSON.stringify(realUrl)}
+${moduleImport}
 ${originImports}
 ${binder}
 ${reexports}
+${passthroughReexports}
 
 __binder.flush()
 
@@ -680,14 +923,15 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
    * @param {LoadContext} context Its loader context.
    * @param {string} originalSpecifier The original import specifier.
    * @param {string[] | Map<string, string | StarBinding>} bindings Its exported bindings.
+   * @param {ReadonlySet<string> | undefined} replaceExports Export bindings hooks can replace.
    */
-  function onWrapSuccess (realUrl, context, originalSpecifier, bindings) {
+  function onWrapSuccess (realUrl, context, originalSpecifier, bindings, replaceExports) {
     specifiers.delete(realUrl)
     // context.format is set to 'commonjs' by getCjsExports during processModule.
     if (context.format === 'commonjs') {
       cjsInIitmChain.add(realUrl)
     }
-    return buildWrapperSource(realUrl, bindings, originalSpecifier)
+    return buildWrapperSource(realUrl, bindings, originalSpecifier, replaceExports, context.format)
   }
 
   // Bookkeeping shared by the async and sync wrap paths when `processModule`
@@ -722,9 +966,13 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
 
       let originalSpecifier = specifierData
       let processContext = context
+      let replaceExports
       if (typeof specifierData !== 'string') {
         originalSpecifier = specifierData.specifier
-        processContext = { ...context, format: specifierData.format }
+        replaceExports = specifierData.replaceExports
+        if (specifierData.format !== undefined) {
+          processContext = { ...context, format: specifierData.format }
+        }
       }
 
       try {
@@ -732,7 +980,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
           processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: parentGetSource }
         )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
+        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings, replaceExports) }
       } catch (cause) {
         onWrapFailure(realUrl, cause)
         // Revert back to the non-iitm URL
@@ -762,9 +1010,13 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
 
       let originalSpecifier = specifierData
       let processContext = context
+      let replaceExports
       if (typeof specifierData !== 'string') {
         originalSpecifier = specifierData.specifier
-        processContext = { ...context, format: specifierData.format }
+        replaceExports = specifierData.replaceExports
+        if (specifierData.format !== undefined) {
+          processContext = { ...context, format: specifierData.format }
+        }
       }
 
       try {
@@ -772,7 +1024,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
           processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: nextLoad }
         )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
+        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings, replaceExports) }
       } catch (cause) {
         onWrapFailure(realUrl, cause)
         url = realUrl
