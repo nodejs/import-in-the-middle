@@ -31,6 +31,36 @@ Hook(['package-i-want-to-modify'], (exported, name, baseDir) => {
 console.log(foo) // 1 more than whatever that module exported
 ```
 
+### Preserving live bindings
+
+By default, each hook can replace every export. IITM must create a local binding
+for each export because the hook can assign a new value to it.
+
+Use `replaceExports` to declare the bindings that a hook can replace. IITM keeps
+every other binding linked to its source module. An empty list is for hooks that
+only mutate nested properties. For ESM modules, it also avoids the generated
+binding cells and initialization work for every export.
+
+```js
+Hook(['package-i-want-to-instrument'], { replaceExports: [] }, (exported) => {
+  exported.Client.prototype.instrumented = true
+})
+```
+
+All hooks for a module contribute to the replacement set. A hook without
+`replaceExports` keeps the default behavior and makes every binding replaceable.
+The lower-level `addHook()` API also makes every binding replaceable because it
+does not filter modules.
+
+The loader must receive the capability before it resolves the module.
+Synchronous `register-hooks.mjs` registration shares it directly. Asynchronous
+registration requires `createAddHookMessageChannel()` and
+`waitForAllMessagesAcknowledged()`.
+
+The wrapper shape cannot change after Node.js links it. A hook registered after
+the import can mutate nested properties. It cannot replace a binding that the
+earlier hooks did not declare.
+
 This requires the use of an ESM loader hook, which can be added with the following
 command-line option.
 

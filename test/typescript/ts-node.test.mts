@@ -16,4 +16,6 @@ new Hook((exported: any, name: string, baseDir: string|void)  => {
 
 });
 
+new Hook(['say-hi'], { replaceExports: ['sayHi'] as const }, () => {})
+
 assert.equal(sayHi('test'), 'Hooked')
