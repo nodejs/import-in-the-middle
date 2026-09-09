@@ -104,7 +104,7 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
       watchFiles.add(url)
     }
     if (result.watchFiles !== undefined) {
-      for (const watchFile of result.watchFiles) {
+      for (const watchFile of normalizeStringIterable(result.watchFiles)) {
         watchFiles.add(watchFile)
       }
     }
@@ -122,7 +122,7 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
       formats.set(result.url, result.format)
     }
     if (result.watchFiles !== undefined) {
-      for (const watchFile of result.watchFiles) {
+      for (const watchFile of normalizeStringIterable(result.watchFiles)) {
         watchFiles.add(watchFile)
       }
     }
@@ -185,7 +185,7 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
   }
   const passthroughExports = selectedPassthroughExports === undefined
     ? undefined
-    : new Set(selectedPassthroughExports)
+    : new Set(normalizeStringIterable(selectedPassthroughExports))
 
   /** @type {WrapperImport[]} */
   const imports = [{
@@ -237,4 +237,12 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
     watchFiles: Array.from(watchFiles),
     sideEffects: true
   }
+}
+
+/**
+ * @param {Iterable<string>} values
+ * @returns {Iterable<string>}
+ */
+function normalizeStringIterable (values) {
+  return typeof values === 'string' ? [values] : values
 }

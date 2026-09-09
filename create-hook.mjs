@@ -335,10 +335,6 @@ export function createHook (meta, commonjs) {
       return result
     }
 
-    if (result.format === undefined && !isJavaScriptUrl(result.url)) {
-      return result
-    }
-
     // If the file is referencing itself, we need to skip adding the iitm search params
     if (result.url === parentURL) {
       return {
@@ -623,10 +619,36 @@ export function createHook (meta, commonjs) {
         processContext = { ...context, format: specifierData.format }
       }
 
+      let loadModule = parentGetSource
+      if (processContext.format === undefined && !isJavaScriptUrl(realUrl)) {
+        let result
+        try {
+          result = await parentGetSource(realUrl, processContext)
+        } catch (cause) {
+          specifiers.delete(realUrl)
+          throw cause
+        }
+        if (result.format !== undefined && !HANDLED_FORMATS.has(result.format)) {
+          specifiers.delete(realUrl)
+          return result
+        }
+        if (result.format !== undefined) processContext = { ...processContext, format: result.format }
+
+        /**
+         * @param {string} loadUrl
+         * @param {Partial<LoadContext>} loadContext
+         * @returns {LoadResult|Promise<LoadResult>}
+         */
+        const loadPreloadedModule = (loadUrl, loadContext) => {
+          return loadUrl === realUrl ? result : parentGetSource(loadUrl, loadContext)
+        }
+        loadModule = loadPreloadedModule
+      }
+
       try {
         const { bindings } = await driveAsync(
           processModule({ srcUrl: realUrl, context: processContext }),
-          { resolve: cachedResolve, load: parentGetSource }
+          { resolve: cachedResolve, load: loadModule }
         )
         return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
       } catch (cause) {
@@ -663,10 +685,36 @@ export function createHook (meta, commonjs) {
         processContext = { ...context, format: specifierData.format }
       }
 
+      let loadModule = nextLoad
+      if (processContext.format === undefined && !isJavaScriptUrl(realUrl)) {
+        let result
+        try {
+          result = nextLoad(realUrl, processContext)
+        } catch (cause) {
+          specifiers.delete(realUrl)
+          throw cause
+        }
+        if (result.format !== undefined && !HANDLED_FORMATS.has(result.format)) {
+          specifiers.delete(realUrl)
+          return result
+        }
+        if (result.format !== undefined) processContext = { ...processContext, format: result.format }
+
+        /**
+         * @param {string} loadUrl
+         * @param {Partial<LoadContext>} loadContext
+         * @returns {LoadResult}
+         */
+        const loadPreloadedModule = (loadUrl, loadContext) => {
+          return loadUrl === realUrl ? result : nextLoad(loadUrl, loadContext)
+        }
+        loadModule = loadPreloadedModule
+      }
+
       try {
         const { bindings } = driveSync(
           processModule({ srcUrl: realUrl, context: processContext }),
-          { resolve: cachedResolve, load: nextLoad }
+          { resolve: cachedResolve, load: loadModule }
         )
         return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
       } catch (cause) {
@@ -681,6 +729,7 @@ export function createHook (meta, commonjs) {
   async function load (url, context, parentLoad) {
     if (hasIitm(url)) {
       const result = await getSource(url, context, parentLoad)
+      if (result?.format && !HANDLED_FORMATS.has(result.format)) return result
       // If wrapping failed, `getSource()` may have fallen back to `parentLoad`,
       // which can legally return `source: null` (e.g. for non-JS formats).
       if (result && typeof result === 'object' && result.source != null) {
@@ -722,6 +771,7 @@ export function createHook (meta, commonjs) {
   function loadSync (url, context, nextLoad) {
     if (hasIitm(url)) {
       const result = getSourceSync(url, context, nextLoad)
+      if (result?.format && !HANDLED_FORMATS.has(result.format)) return result
       // If wrapping failed, `getSourceSync()` may have fallen back to `nextLoad`,
       // which can legally return `source: null` (e.g. for non-JS formats).
       if (result && typeof result === 'object' && result.source != null) {

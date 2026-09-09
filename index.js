@@ -144,7 +144,7 @@ function callExtendedHook (hookFn, modules, internals, name, namespace, specifie
       } else if (matchArg === name) {
         if (!baseDir) {
           result = callExtendedHookFn(hookFn, namespace, name, baseDir, data, format)
-        } else if (matchesPackageDirectory(specifiers.get(loadUrl), baseDir)) {
+        } else if (matchesPackageDirectory(specifier, baseDir)) {
           result = callExtendedHookFn(hookFn, namespace, name, baseDir, data, format)
         } else if (internals) {
           const internalPath = name + path.sep + path.relative(baseDir, filePath)

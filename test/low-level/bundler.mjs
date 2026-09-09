@@ -35,7 +35,7 @@ function unexpectedPassthroughSelection () {
 
 /**
  * @param {ReadonlyArray<{ name: string, url: string, localName?: string }>} exports The resolved exports.
- * @returns {string[]}
+ * @returns {string}
  */
 function selectLiveExport (exports) {
   deepStrictEqual(exports, [
@@ -43,7 +43,7 @@ function selectLiveExport (exports) {
     { name: 'stable', url: liveModuleUrl, localName: 'stable' },
     { name: 'increment', url: liveModuleUrl, localName: 'increment' }
   ])
-  return ['live']
+  return 'live'
 }
 
 /**
@@ -258,7 +258,7 @@ const staticPassthroughWrapper = await createWrapperModule({
     format: 'module',
     source: "export { live } from './unresolved.mjs'",
     specifier: './static-passthrough.mjs',
-    passthroughExports: ['live']
+    passthroughExports: 'live'
   },
   resolve: unexpectedIo,
   load: unexpectedIo
@@ -465,7 +465,7 @@ function resolveModule (specifier, context) {
   return {
     url: new URL(specifier, context.parentURL).href,
     format: 'module',
-    watchFiles: [packageUrl]
+    watchFiles: packageUrl
   }
 }
 
@@ -517,6 +517,81 @@ registerCommonJS(
 strictEqual(commonJsPackageName, undefined)
 commonJsPackageHook.unhook()
 
+registerCommonJS(hookedPackageUrl, { exports: {} }, './sub', undefined)
+const sameUrlFormats = []
+
+/**
+ * @param {object} exports The registered exports.
+ * @param {string} name The package name.
+ * @param {string|undefined} baseDir The package directory.
+ * @param {unknown} data Consumer data associated with the module.
+ * @param {'module'|'commonjs'} format The module format.
+ */
+function captureSameUrlFormat (exports, name, baseDir, data, format) {
+  sameUrlFormats.push(format)
+}
+
+const sameUrlHook = new Hook(['some-external-module'], captureSameUrlFormat)
+deepStrictEqual(sameUrlFormats, ['module'])
+sameUrlHook.unhook()
+
+const registerPath = require.resolve('../../lib/register.js')
+delete require.cache[registerPath]
+const bundledRegister = require(registerPath)
+let crossCopyCalls = 0
+
+/**
+ * @param {object} exports The module namespace.
+ * @param {string} name The package name.
+ * @param {string|undefined} baseDir The package directory.
+ * @param {unknown} data Consumer data associated with the module.
+ * @param {'module'|'commonjs'} format The module format.
+ */
+function captureCrossCopyRegistration (exports, name, baseDir, data, format) {
+  crossCopyCalls++
+  strictEqual(name, 'cross-copy-package')
+  deepStrictEqual(data, { version: '1.0.0' })
+  strictEqual(format, 'module')
+}
+
+const crossCopyHook = new Hook(['cross-copy-package'], captureCrossCopyRegistration)
+bundledRegister.registerWithData(
+  'file:///tmp/node_modules/cross-copy-package/index.mjs',
+  new bundledRegister.ModuleBinder({}),
+  'cross-copy-package',
+  { version: '1.0.0' }
+)
+strictEqual(crossCopyCalls, 1)
+crossCopyHook.unhook()
+
+delete require.cache[registerPath]
+const earlyBundledRegister = require(registerPath)
+earlyBundledRegister.registerCommonJS(
+  'file:///tmp/node_modules/late-cross-copy-package/index.js',
+  { exports: {} },
+  'late-cross-copy-package',
+  { version: '2.0.0' }
+)
+let lateCrossCopyCalls = 0
+
+/**
+ * @param {object} exports The CommonJS exports.
+ * @param {string} name The package name.
+ * @param {string|undefined} baseDir The package directory.
+ * @param {unknown} data Consumer data associated with the module.
+ * @param {'module'|'commonjs'} format The module format.
+ */
+function captureLateCrossCopyRegistration (exports, name, baseDir, data, format) {
+  lateCrossCopyCalls++
+  strictEqual(name, 'late-cross-copy-package')
+  deepStrictEqual(data, { version: '2.0.0' })
+  strictEqual(format, 'commonjs')
+}
+
+const lateCrossCopyHook = new Hook(['late-cross-copy-package'], captureLateCrossCopyRegistration)
+strictEqual(lateCrossCopyCalls, 1)
+lateCrossCopyHook.unhook()
+
 let commonJsInternalName
 const commonJsInternalHook = new Hook(['some-external-module'], { internals: true }, (exports, name) => {
   commonJsInternalName = name
@@ -565,7 +640,7 @@ async function loadModule (url, context) {
   return {
     source: await readFile(new URL(url), 'utf8'),
     format: context.format,
-    watchFiles: [sourceWatchUrl]
+    watchFiles: sourceWatchUrl
   }
 }
 

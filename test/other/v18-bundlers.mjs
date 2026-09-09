@@ -109,10 +109,34 @@ function unexpectedIo () {
  * @param {Map<string, Awaited<ReturnType<typeof createWrapperModule>>>} wrappers Generated wrappers by module format.
  */
 async function testEsbuild (entrySource, wrappers) {
-  const outfile = join(temporaryDirectory, 'esbuild.cjs')
+  await Promise.all([
+    buildEsbuildBundle(entrySource, wrappers, 'cjs', false),
+    buildEsbuildBundle(entrySource, wrappers, 'esm', true)
+  ])
+}
+
+/**
+ * @param {string} entrySource The application entry source.
+ * @param {Map<string, Awaited<ReturnType<typeof createWrapperModule>>>} wrappers Generated wrappers by module format.
+ * @param {'cjs'|'esm'} format The output module format.
+ * @param {boolean} minify Whether esbuild minifies the output.
+ * @returns {Promise<void>}
+ */
+async function buildEsbuildBundle (entrySource, wrappers, format, minify) {
+  const extension = format === 'esm'
+    ? 'mjs'
+    : 'cjs'
+  const outfile = join(temporaryDirectory, `esbuild.${extension}`)
   await esbuild.build({
+    banner: format === 'esm'
+      ? {
+          js: `import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)`
+        }
+      : undefined,
     bundle: true,
-    format: 'cjs',
+    format,
+    minify,
     platform: 'node',
     outfile,
     stdin: {
