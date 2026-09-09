@@ -1,7 +1,9 @@
 'use strict'
 
+import { readFileSync } from 'fs'
 import { builtinModules } from 'module'
 
+import createGetPackageDetails from './lib/get-package-details.js'
 import { driveAsync } from './lib/io.mjs'
 import {
   buildCommonJSWrapperSource,
@@ -15,9 +17,15 @@ const MODULE_SPECIFIER_PREFIX = './__iitm_module_'
 const runtimeUrl = new URL('./lib/bundler-runtime.js', import.meta.url).href
 
 /**
+ * EXPERIMENTAL
+ * This API is experimental and may change in minor versions.
+ */
+export const getPackageDetails = createGetPackageDetails(readFileSync)
+
+/**
  * @typedef {object} BundlerModule
  * @property {string} url
- * @property {string} format
+ * @property {string} [format]
  * @property {string} specifier
  * @property {string | ArrayBuffer | ArrayBufferView} [source]
  * @property {unknown} [data]
@@ -32,6 +40,12 @@ const runtimeUrl = new URL('./lib/bundler-runtime.js', import.meta.url).href
  * @typedef {object} ModuleContext
  * @property {string} [format]
  * @property {string} [parentURL]
+ */
+
+/**
+ * @typedef {object} ResolveContext
+ * @property {string} [format]
+ * @property {string} parentURL
  */
 
 /**
@@ -64,9 +78,11 @@ const runtimeUrl = new URL('./lib/bundler-runtime.js', import.meta.url).href
  *
  * @param {object} options
  * @param {BundlerModule} options.module
- * @param {(specifier: string, context: ModuleContext) =>
- *   (ResolveResult | Promise<ResolveResult>)} options.resolve
- * @param {(url: string, context: ModuleContext) => (LoadResult | Promise<LoadResult>)} options.load
+ * @param {(specifier: string, context: ResolveContext) =>
+ *   (ResolveResult | Promise<ResolveResult>)} [options.resolve] Required unless the module has an explicit CommonJS
+ *   format.
+ * @param {(url: string, context: ModuleContext) => (LoadResult | Promise<LoadResult>)} [options.load] Required unless
+ *   an explicitly formatted CommonJS module supplies its source.
  * @returns {Promise<{
  *   code: string,
  *   imports: WrapperImport[],
@@ -79,6 +95,7 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
   const context = { format: moduleData.format, cache: false }
   const watchFiles = new Set()
   const formats = new Map([[moduleData.url, moduleData.format]])
+  let source = moduleData.source
 
   if (moduleData.url.startsWith('file:')) {
     watchFiles.add(moduleData.url)
@@ -90,14 +107,17 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
    * @returns {Promise<LoadResult>}
    */
   const loadModule = async (url, loadContext) => {
-    if (url === moduleData.url && moduleData.source !== undefined) {
+    if (url === moduleData.url && source !== undefined) {
       return {
-        source: moduleData.source,
+        source,
         format: moduleData.format
       }
     }
 
     const result = await load(url, loadContext)
+    if (url === moduleData.url && result.source !== undefined) {
+      source = result.source
+    }
     if (result.format !== undefined) {
       formats.set(url, result.format)
     }
@@ -114,7 +134,7 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
 
   /**
    * @param {string} specifier
-   * @param {ModuleContext} resolveContext
+   * @param {ResolveContext} resolveContext
    * @returns {Promise<ResolveResult>}
    */
   const resolveModule = async (specifier, resolveContext) => {
@@ -131,7 +151,6 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
   }
 
   if (moduleData.format === 'commonjs' || moduleData.format === 'commonjs-typescript') {
-    let source = moduleData.source
     if (source === undefined) {
       const result = await loadModule(moduleData.url, context)
       source = result.source
@@ -140,28 +159,7 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
       throw new TypeError(`The bundler load adapter returned no source for '${moduleData.url}'`)
     }
 
-    return {
-      code: buildCommonJSWrapperSource({
-        realUrl: moduleData.url,
-        source,
-        originalSpecifier: moduleData.specifier,
-        data: moduleData.data,
-        runtimeSpecifier: RUNTIME_SPECIFIER,
-        preserveOuterBindings: true
-      }),
-      imports: [{
-        specifier: RUNTIME_SPECIFIER,
-        kind: 'runtime',
-        target: {
-          url: runtimeUrl,
-          format: 'commonjs'
-        },
-        external: false
-      }],
-      watchFiles: Array.from(watchFiles),
-      sideEffects: true,
-      sourceLineOffset: 1
-    }
+    return createCommonJSWrapper(moduleData, source, watchFiles)
   }
 
   const io = { resolve: resolveModule, load: loadModule }
@@ -174,6 +172,9 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
     context,
     moduleExportsCache
   }), io)
+  if (context.format === 'commonjs' || context.format === 'commonjs-typescript') {
+    return createCommonJSWrapper(moduleData, source, watchFiles)
+  }
   let selectedPassthroughExports = moduleData.passthroughExports
   if (selectPassthroughExports !== undefined) {
     const exportNames = Array.isArray(bindings) ? bindings.slice() : Array.from(bindings.keys())
@@ -238,6 +239,43 @@ export async function createWrapperModule ({ module: moduleData, resolve, load }
     imports,
     watchFiles: Array.from(watchFiles),
     sideEffects: true
+  }
+}
+
+/**
+ * @param {BundlerModule} moduleData
+ * @param {string | ArrayBuffer | ArrayBufferView} source
+ * @param {Set<string>} watchFiles
+ * @returns {{
+ *   code: string,
+ *   imports: WrapperImport[],
+ *   watchFiles: string[],
+ *   sideEffects: true,
+ *   sourceLineOffset: number
+ * }}
+ */
+function createCommonJSWrapper (moduleData, source, watchFiles) {
+  return {
+    code: buildCommonJSWrapperSource({
+      realUrl: moduleData.url,
+      source,
+      originalSpecifier: moduleData.specifier,
+      data: moduleData.data,
+      runtimeSpecifier: RUNTIME_SPECIFIER,
+      preserveOuterBindings: true
+    }),
+    imports: [{
+      specifier: RUNTIME_SPECIFIER,
+      kind: 'runtime',
+      target: {
+        url: runtimeUrl,
+        format: 'commonjs'
+      },
+      external: false
+    }],
+    watchFiles: Array.from(watchFiles),
+    sideEffects: true,
+    sourceLineOffset: 1
   }
 }
 

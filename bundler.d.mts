@@ -1,5 +1,14 @@
 export type WrapperSource = string | ArrayBuffer | ArrayBufferView
 
+export type PackageDetails = {
+  name: string
+  packageJsonUrl: string
+  packageUrl: string
+  path: string
+  type?: string
+  version?: string
+}
+
 export type JsonValue =
   | boolean
   | null
@@ -29,7 +38,7 @@ export type PassthroughExports =
 
 export type BundlerModule<Data = JsonValue> = {
   url: string
-  format: string
+  format?: string
   specifier: string
   source?: WrapperSource
   data?: JsonCompatible<Data>
@@ -39,6 +48,10 @@ export type BundlerModule<Data = JsonValue> = {
 export type ModuleContext = {
   format?: string
   parentURL?: string
+}
+
+export type ResolveContext = ModuleContext & {
+  parentURL: string
 }
 
 export type ModuleTarget = {
@@ -71,17 +84,46 @@ export type WrapperModule = {
   sourceLineOffset?: number
 }
 
-export type CreateWrapperModuleOptions<Data = JsonValue> = {
-  module: BundlerModule<Data>
-  resolve: (
-    specifier: string,
-    context: ModuleContext
-  ) => ResolveResult | Promise<ResolveResult>
-  load: (
-    url: string,
-    context: ModuleContext
-  ) => LoadResult | Promise<LoadResult>
+type CommonJSFormat = 'commonjs' | 'commonjs-typescript'
+
+type Resolve = (
+  specifier: string,
+  context: ResolveContext
+) => ResolveResult | Promise<ResolveResult>
+
+type Load = (
+  url: string,
+  context: ModuleContext
+) => LoadResult | Promise<LoadResult>
+
+type InlineCommonJSOptions<Data> = {
+  module: BundlerModule<Data> & {
+    format: CommonJSFormat
+    source: WrapperSource
+  }
+  resolve?: Resolve
+  load?: Load
 }
+
+type LoadedCommonJSOptions<Data> = {
+  module: BundlerModule<Data> & {
+    format: CommonJSFormat
+    source?: WrapperSource
+  }
+  resolve?: Resolve
+  load: Load
+}
+
+type AdapterBackedOptions<Data> = {
+  module: BundlerModule<Data>
+  resolve: Resolve
+  load: Load
+}
+
+export type CreateWrapperModuleOptions<Data = JsonValue> =
+  | InlineCommonJSOptions<Data>
+  | LoadedCommonJSOptions<Data>
+  | AdapterBackedOptions<Data>
 
 /**
  * EXPERIMENTAL
@@ -90,3 +132,9 @@ export type CreateWrapperModuleOptions<Data = JsonValue> = {
 export declare function createWrapperModule<Data = JsonValue>(
   options: CreateWrapperModuleOptions<Data>
 ): Promise<WrapperModule>
+
+/**
+ * EXPERIMENTAL
+ * This API is experimental and may change in minor versions.
+ */
+export declare function getPackageDetails(url: string): PackageDetails | undefined

@@ -537,29 +537,40 @@ export function createHook (meta, commonjs) {
   let wrapRequireLoad
   if (commonjs === true) {
     wrapRequireLoad = (url, context, result, specifierData, nextLoad) => {
-      const format = result.format ?? specifierData.format
+      let format = result.format ?? specifierData.format
       let source = result.source
 
-      if (format === 'module' || format === 'module-typescript') {
+      if (format === undefined && source == null && url.startsWith('file:')) {
+        source = process.getBuiltinModule('fs').readFileSync(fileURLToPath(url))
+      }
+
+      if (format === 'module' || format === 'module-typescript' ||
+          (format === undefined && isJavaScriptUrl(url))) {
         const processContext = { ...context, format }
+        const loaded = source === result.source ? result : { ...result, source }
         /**
          * @param {string} loadUrl
          * @param {Partial<LoadContext>} loadContext
          * @returns {LoadResult}
          */
         const loadModule = (loadUrl, loadContext) => {
-          return loadUrl === url ? result : nextLoad(loadUrl, loadContext)
+          return loadUrl === url ? loaded : nextLoad(loadUrl, loadContext)
         }
         try {
           const { bindings } = driveSync(
             processModule({ srcUrl: url, context: processContext }),
             { resolve: cachedResolve, load: loadModule }
           )
-          return {
-            ...result,
-            format: 'module',
-            source: onWrapSuccess(url, processContext, specifierData.specifier, bindings),
-            shortCircuit: true
+          if (processContext.format === 'commonjs') {
+            format = 'commonjs'
+            cjsInIitmChain.add(url)
+          } else {
+            return {
+              ...result,
+              format: 'module',
+              source: onWrapSuccess(url, processContext, specifierData.specifier, bindings),
+              shortCircuit: true
+            }
           }
         } catch (cause) {
           onWrapFailure(url, cause)

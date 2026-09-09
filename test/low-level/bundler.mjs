@@ -1,4 +1,4 @@
-import { strictEqual, deepStrictEqual, match, doesNotMatch, rejects } from 'assert'
+import { strictEqual, deepStrictEqual, match, doesNotMatch, rejects, throws } from 'assert'
 import { spawnSync } from 'child_process'
 import { readFile, mkdir, mkdtemp, writeFile, rm } from 'fs/promises'
 import { createRequire } from 'module'
@@ -7,14 +7,16 @@ import { join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 
 import Hook from '../../index.js'
-import { createWrapperModule } from '../../bundler.mjs'
+import { createWrapperModule, getPackageDetails } from '../../bundler.mjs'
 
 const require = createRequire(import.meta.url)
 const {
   createWrapperModule: createCommonJSWrapperModule,
+  getPackageDetails: getCommonJSPackageDetails,
   getNodeModuleFormat
 } = require('../../bundler.js')
 const { ModuleBinder, registerCommonJS, registerWithData } = require('../../lib/bundler-runtime.js')
+const createGetNodeModuleFormat = require('../../lib/get-node-module-format.js')
 const moduleUrl = new URL('../fixtures/something.mjs', import.meta.url).href
 const reexportLeafUrl = new URL('../fixtures/reexport-same-source-leaf.mjs', import.meta.url).href
 const source = await readFile(new URL(moduleUrl), 'utf8')
@@ -92,6 +94,23 @@ match(wrapper.code, /\nregisterWithData\(/)
 match(wrapper.code, /\{"version":"1\.0\.0"\}\)/)
 doesNotMatch(wrapper.code, /from "file:/)
 
+const inferredCommonJsWrapper = await createWrapperModule({
+  module: {
+    url: new URL('../fixtures/typeless-commonjs.js', import.meta.url).href,
+    source: 'module.exports = class Example {}',
+    specifier: 'typeless-commonjs',
+    data: { version: '1.0.0' }
+  },
+  resolve: unexpectedIo,
+  load: unexpectedIo
+})
+
+strictEqual(inferredCommonJsWrapper.imports.length, 1)
+strictEqual(inferredCommonJsWrapper.imports[0].kind, 'runtime')
+strictEqual(inferredCommonJsWrapper.sourceLineOffset, 1)
+match(inferredCommonJsWrapper.code, /registerCommonJS\(/)
+doesNotMatch(inferredCommonJsWrapper.code, /registerWithData\(/)
+
 const emptyPassthroughWrapper = await createWrapperModule({
   module: {
     url: moduleUrl,
@@ -132,6 +151,9 @@ try {
   const nestedDirectory = join(formatDirectory, 'nested')
   await mkdir(nestedDirectory)
   await writeFile(join(nestedDirectory, 'package.json'), '{"type":"commonjs"}')
+  const typelessDirectory = join(formatDirectory, 'typeless')
+  await mkdir(typelessDirectory)
+  await writeFile(join(typelessDirectory, 'package.json'), '{}')
   strictEqual(
     getNodeModuleFormat(pathToFileURL(join(nestedDirectory, 'module.js')).href, packageJsonUrl, 'module'),
     'commonjs'
@@ -142,12 +164,84 @@ try {
   strictEqual(getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'module.cjs')).href), 'commonjs')
   strictEqual(getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'module.mts')).href), 'module-typescript')
   strictEqual(getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'module.cts')).href), 'commonjs-typescript')
+  strictEqual(getNodeModuleFormat(pathToFileURL(join(typelessDirectory, 'module.js')).href), undefined)
+  strictEqual(getNodeModuleFormat(pathToFileURL(join(typelessDirectory, 'module.ts')).href), undefined)
+  await writeFile(join(formatDirectory, 'package.json'), '{"type":"commonjs"}')
+  strictEqual(getNodeModuleFormat(pathToFileURL(join(formatDirectory, 'module.js')).href), 'commonjs')
 } finally {
   await rm(formatDirectory, { recursive: true, force: true })
 }
 
 strictEqual(getNodeModuleFormat('node:fs'), 'builtin')
 strictEqual(getNodeModuleFormat(moduleUrl.replace(/\.mjs$/, '.json')), undefined)
+
+let packageJsonReads = 0
+const getCachedNodeModuleFormat = createGetNodeModuleFormat(() => {
+  packageJsonReads++
+  return '{"type":"module"}'
+})
+strictEqual(getCachedNodeModuleFormat('file:///cached/one.js'), 'module')
+strictEqual(getCachedNodeModuleFormat('file:///cached/two.js'), 'module')
+strictEqual(packageJsonReads, 1)
+
+const packageDirectory = await mkdtemp(join(tmpdir(), 'iitm-bundler-package-'))
+const packageJsonUrl = pathToFileURL(join(packageDirectory, 'package.json')).href
+await writeFile(join(packageDirectory, 'package.json'), JSON.stringify({
+  name: '@scope/example',
+  type: 'module',
+  version: '1.2.3'
+}))
+await mkdir(join(packageDirectory, 'nested'), { recursive: true })
+await writeFile(join(packageDirectory, 'nested/package.json'), '{"type":"commonjs"}')
+const packageModuleUrl = pathToFileURL(join(packageDirectory, 'nested/module.js')).href
+const expectedPackageDetails = {
+  name: '@scope/example',
+  packageJsonUrl,
+  packageUrl: new URL('.', packageJsonUrl).href,
+  path: 'nested/module.js',
+  type: 'module',
+  version: '1.2.3'
+}
+
+deepStrictEqual(getPackageDetails(packageModuleUrl), expectedPackageDetails)
+deepStrictEqual(getPackageDetails(`${packageModuleUrl}?loader#fragment`), expectedPackageDetails)
+deepStrictEqual(getCommonJSPackageDetails(packageModuleUrl), expectedPackageDetails)
+await writeFile(join(packageDirectory, 'package.json'), JSON.stringify({
+  name: '@scope/example-renamed',
+  type: 'commonjs',
+  version: '2.0.0'
+}))
+const updatedPackageDetails = {
+  ...expectedPackageDetails,
+  name: '@scope/example-renamed',
+  type: 'commonjs',
+  version: '2.0.0'
+}
+deepStrictEqual(getPackageDetails(packageModuleUrl), updatedPackageDetails)
+deepStrictEqual(getCommonJSPackageDetails(packageModuleUrl), updatedPackageDetails)
+strictEqual(getPackageDetails('node:fs'), undefined)
+const noPackageUrl = pathToFileURL(join(tmpdir(), 'iitm-no-package/module.js')).href
+strictEqual(getPackageDetails(noPackageUrl), undefined)
+strictEqual(getPackageDetails(noPackageUrl), undefined)
+
+const minimalPackageDirectory = await mkdtemp(join(tmpdir(), 'iitm-bundler-minimal-package-'))
+const minimalPackageJsonUrl = pathToFileURL(join(minimalPackageDirectory, 'package.json')).href
+await writeFile(join(minimalPackageDirectory, 'package.json'), '{"name":"minimal"}')
+deepStrictEqual(getPackageDetails(pathToFileURL(join(minimalPackageDirectory, 'module.js')).href), {
+  name: 'minimal',
+  packageJsonUrl: minimalPackageJsonUrl,
+  packageUrl: new URL('.', minimalPackageJsonUrl).href,
+  path: 'module.js',
+  type: undefined,
+  version: undefined
+})
+
+const invalidPackageDirectory = await mkdtemp(join(tmpdir(), 'iitm-bundler-invalid-package-'))
+await writeFile(join(invalidPackageDirectory, 'package.json'), '{')
+throws(
+  () => getPackageDetails(pathToFileURL(join(invalidPackageDirectory, 'module.js')).href),
+  SyntaxError
+)
 
 /**
  * @param {object} exported
@@ -359,9 +453,7 @@ const commonJsWrapper = await createWrapperModule({
     specifier: './something.js',
     data: { version: '1.0.0' },
     passthroughExports: unexpectedPassthroughSelection
-  },
-  resolve: unexpectedIo,
-  load: unexpectedIo
+  }
 })
 
 strictEqual(commonJsWrapper.imports.length, 1)

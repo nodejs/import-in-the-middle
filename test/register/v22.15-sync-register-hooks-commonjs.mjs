@@ -80,8 +80,8 @@ try {
   rmSync(formatDirectory, { recursive: true, force: true })
 }
 
-strictEqual(resolveAsRequire('file:///iitm-default/module.ts').url, 'file:///iitm-default/module.ts')
-strictEqual(resolveAsRequire('file:///iitm-default/module.js').url, 'file:///iitm-default/module.js')
+strictEqual(resolveAsRequire('file:///iitm-default/module.ts').url, 'file:///iitm-default/module.ts?iitm=true')
+strictEqual(resolveAsRequire('file:///iitm-default/module.js').url, 'file:///iitm-default/module.js?iitm=true')
 
 const fallbackDirectory = mkdtempSync(join(tmpdir(), 'iitm-commonjs-source-'))
 const fallbackFilename = join(fallbackDirectory, 'module.cjs')
@@ -173,10 +173,13 @@ const applicationJavaScriptUrl = 'data:application/javascript,export%20const%20v
 const nativeFormatDirectory = mkdtempSync(join(tmpdir(), 'iitm-native-formats-'))
 const loadTimeJsonFilename = join(nativeFormatDirectory, 'load-time.json')
 const loadTimeJsonUrl = pathToFileURL(loadTimeJsonFilename).href
+const transformedCommonJsFilename = join(nativeFormatDirectory, 'transformed.js')
+const transformedCommonJsUrl = pathToFileURL(transformedCommonJsFilename).href
 const loadTimeWasmSpecifier = 'iitm-load-time-wasm'
 const loadTimeWasmFilename = join(nativeFormatDirectory, 'load-time.wasm')
 const loadTimeWasmUrl = pathToFileURL(loadTimeWasmFilename).href
 writeFileSync(loadTimeJsonFilename, '{"value":42}')
+writeFileSync(transformedCommonJsFilename, "module.exports = 'disk'\n")
 writeFileSync(loadTimeWasmFilename, new Uint8Array([
   0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
   0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
@@ -194,6 +197,9 @@ writeFileSync(loadTimeWasmFilename, new Uint8Array([
 function resolveLoadTimeModule (specifier, context, nextResolve) {
   if (specifier === loadTimeSpecifier || specifier === loadTimeModuleUrl) {
     return { url: loadTimeModuleUrl, shortCircuit: true }
+  }
+  if (specifier === transformedCommonJsFilename || specifier === transformedCommonJsUrl) {
+    return { url: transformedCommonJsUrl, format: undefined, shortCircuit: true }
   }
   if (specifier === loadTimeWasmSpecifier) {
     return { url: loadTimeWasmUrl, shortCircuit: true }
@@ -215,6 +221,13 @@ function loadLoadTimeModule (url, context, nextLoad) {
       shortCircuit: true
     }
   }
+  if (url === transformedCommonJsUrl) {
+    return {
+      format: undefined,
+      source: "module.exports = 'loader'\n",
+      shortCircuit: true
+    }
+  }
   return nextLoad(url, context)
 }
 
@@ -226,6 +239,7 @@ register({
     commonJsTypeScriptUrl.href,
     esmUrl.href,
     loadTimeSpecifier,
+    transformedCommonJsUrl,
     /^data:application\/javascript,/,
     loadTimeJsonUrl,
     loadTimeWasmSpecifier,
@@ -237,6 +251,7 @@ register({
 const require = nodeModule.createRequire(import.meta.url)
 try {
   deepStrictEqual(require(loadTimeJsonFilename), { value: 42 })
+  strictEqual(require(transformedCommonJsFilename), 'loader')
   const wasmNamespace = await import(loadTimeWasmSpecifier)
   strictEqual(wasmNamespace.answer(), 42)
 } finally {

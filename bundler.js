@@ -3,8 +3,10 @@
 const { readFileSync } = require('node:fs')
 
 const createGetNodeModuleFormat = require('./lib/get-node-module-format.js')
+const createGetPackageDetails = require('./lib/get-package-details.js')
 
-const getNodeModuleFormat = createGetNodeModuleFormat(readFileSync)
+const getNodeModuleFormat = createGetNodeModuleFormat(readFileSync, false)
+const getPackageDetails = createGetPackageDetails(readFileSync)
 
 /** @type {typeof import('./bundler.mjs').createWrapperModule|undefined} */
 let createWrapperModuleImplementation
@@ -21,6 +23,12 @@ async function createWrapperModule (options) {
 }
 
 exports.createWrapperModule = createWrapperModule
+
+/**
+ * EXPERIMENTAL
+ * This API is experimental and may change in minor versions.
+ */
+exports.getPackageDetails = getPackageDetails
 
 /**
  * EXPERIMENTAL
