@@ -22,8 +22,10 @@ try {
     'supports-sync-hooks.mjs',
     'lib/get-esm-exports.mjs',
     'lib/get-exports.mjs',
+    'lib/get-node-module-format.js',
     'lib/io.mjs',
-    'lib/register.js'
+    'lib/register.js',
+    'lib/wrapper.mjs'
   ]
   const setupPromises = []
   for (const filename of packageFiles) {

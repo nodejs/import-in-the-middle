@@ -18,16 +18,26 @@ export type Namespace = { [key: string]: any }
  * starting from the package name.
  * @param {baseDir} string The absolute path of the module, if not provided in
  * `name`.
+ * The `data` and `format` arguments are experimental and may change in minor versions.
+ * @param {data} Data Optional metadata embedded by a bundler.
+ * @param {format} string The intercepted module format, when available.
  * @return any A value that can will be assigned to `exports.default`. This is
- * equivalent to doing that assignment in the body of this function.
+ * equivalent to doing that assignment in the body of this function. For
+ * CommonJS modules, the value replaces `module.exports`.
  */
-export type HookFn = (exported: Namespace, name: string, baseDir: string|void) => any
+export type HookFn<Data = unknown, Exports = Namespace> = (
+  exported: Exports,
+  name: string,
+  baseDir: string|void,
+  data?: Data,
+  format?: 'module'|'commonjs'
+) => any
 
 export type Options = {
   internals?: boolean
 }
 
-export declare class Hook {
+export declare class Hook<Data = unknown, Exports = Namespace> {
   /**
    * Creates a hook to be run on any already loaded modules and any that will
    * be loaded in the future. It will be run once per loaded module. If
@@ -41,9 +51,9 @@ export declare class Hook {
    * unless they are mentioned specifically in the modules array.
    * @param {HookFunction} hookFn The function to be run on each module.
    */
-  constructor (modules: Array<string>, options: Options, hookFn: HookFn)
-  constructor (modules: Array<string>, hookFn: HookFn)
-  constructor (hookFn: HookFn)
+  constructor (modules: Array<string>, options: Options, hookFn: HookFn<Data, Exports>)
+  constructor (modules: Array<string>, hookFn: HookFn<Data, Exports>)
+  constructor (hookFn: HookFn<Data, Exports>)
 
   /**
    * Disables this hook. It will no longer be run against any subsequently
@@ -60,8 +70,18 @@ export default Hook
  * @param {url} string The absolute path of the module, as a `file:` URL string.
  * @param {exported} { [string]: any } An object representing the exported
  * items of a module.
+ * @param {specifier} string The original import or require specifier.
+ * The `data` and `format` arguments are experimental and may change in minor versions.
+ * @param {data} Data Optional metadata embedded by a bundler.
+ * @param {format} string The intercepted module format, when available.
  */
-export type HookFunction = (url: string, exported: Namespace) => void
+export type HookFunction<Data = unknown, Exports = Namespace> = (
+  url: string,
+  exported: Exports,
+  specifier: string,
+  data?: Data,
+  format?: 'module'|'commonjs'
+) => unknown
 
 /**
  * Adds a hook to be run on any already loaded modules and any that will be
@@ -73,7 +93,7 @@ export type HookFunction = (url: string, exported: Namespace) => void
  * single imported module, rather than with any filtering.
  * @param {HookFunction} hookFn The function to be run on each module.
  */
-export declare function addHook(hookFn: HookFunction): void
+export declare function addHook<Data = unknown, Exports = Namespace>(hookFn: HookFunction<Data, Exports>): void
 
 /**
  * Removes a hook that has been previously added with `addHook`. It will no
@@ -83,7 +103,7 @@ export declare function addHook(hookFn: HookFunction): void
  * `Hook` class.
  * @param {HookFunction} hookFn The function to be removed.
  */
-export declare function removeHook(hookFn: HookFunction): void
+export declare function removeHook<Data = unknown, Exports = Namespace>(hookFn: HookFunction<Data, Exports>): void
 
 type CreateAddHookMessageChannelReturn<Data> = {
   addHookMessagePort: MessagePort,

@@ -1,9 +1,8 @@
 # import-in-the-middle
 
 **`import-in-the-middle`** is a module loading interceptor inspired by
-[`require-in-the-middle`](https://npm.im/require-in-the-middle), but
-specifically for ESM modules. In fact, it can even modify modules after loading
-time.
+[`require-in-the-middle`](https://npm.im/require-in-the-middle). It intercepts
+ESM modules and can opt into CommonJS when synchronous hooks are available.
 
 ## Usage
 
@@ -115,6 +114,88 @@ fs.readFileSync('file.txt')
 node --import=./instrument.mjs ./my-app.mjs
 ```
 
+## Bundler integrations
+
+> **Note:** The bundler integration API is experimental. It may change in minor versions.
+
+Bundlers can generate ESM and CommonJS wrappers with
+`createWrapperModule`:
+
+```js
+import { createWrapperModule } from 'import-in-the-middle/bundler.mjs'
+
+const wrapper = await createWrapperModule({
+  module: { url, format, source, specifier, data, passthroughExports },
+  resolve,
+  load
+})
+```
+
+`format` is optional. When omitted, IITM detects ESM or CommonJS from the source before it creates the wrapper.
+
+CommonJS integrations can use the lazy-loading facade. Both entry points expose
+`getPackageDetails`, which finds the nearest named package for a resolved file.
+The CommonJS facade also exposes the module format detection used by the Node
+loader:
+
+```js
+const {
+  createWrapperModule,
+  getNodeModuleFormat,
+  getPackageDetails
+} = require('import-in-the-middle/bundler')
+
+const packageDetails = getPackageDetails(url)
+const format = getNodeModuleFormat(url, packageDetails?.packageJsonUrl, packageDetails?.type)
+```
+
+`getPackageDetails` accepts a resolved `file:` URL. It returns the package
+`name`, optional `version` and `type`, package and `package.json` URLs, and the
+slash-separated module `path`. It walks past unnamed package scopes, which lets
+bundlers identify linked workspace packages without relying on a `node_modules`
+path. It returns `undefined` when no named package owns the URL.
+
+`url` is the canonical `file:` or `node:` URL reported to hooks. `resolve` and
+`load` adapt the bundler's resolver and source loader to the same URL-based
+module graph. `resolve` always receives the declaring module's `parentURL`.
+Both callbacks can be omitted when an explicitly formatted CommonJS module
+supplies its source. Only `load` is required when that source is omitted.
+
+`getNodeModuleFormat` returns `undefined` for typeless `.js` and `.ts` files.
+The bundler must determine their format from the source.
+
+The package helpers read current metadata on each call. A bundler can cache
+their results for one build and discard that cache before a watch rebuild.
+
+The optional `data` value must be JSON-serializable. It is embedded in the
+wrapper and passed as the fourth argument to `Hook` callbacks, allowing package
+metadata needed by instrumentation to reach the bundled runtime.
+
+`passthroughExports` identifies ESM exports that must keep their original live
+bindings. It accepts an iterable of names or a selector that receives all
+resolved exports after IITM loads the module graph. Each resolved export has
+the public `name`, the defining module `url`, and its `localName` when it has a
+local ESM binding. IITM emits direct re-exports for selected names and exposes
+their current values to `Hook` callbacks. Assignments from a callback do not
+replace these bindings. Other exports remain patchable. This option has no
+effect on CommonJS modules, and names that the module does not export are
+ignored.
+
+The result contains generated `code`, an `imports` manifest, `watchFiles`, and
+`sideEffects: true`. The code imports only relative placeholder specifiers. The
+bundler adapter provides it as a virtual module and maps each placeholder using
+the manifest, so filesystem paths, virtual IDs, external modules, and cache
+invalidation remain owned by the bundler. `watchFiles` are file URLs that the
+adapter converts to its native watch-dependency format.
+
+CommonJS results also contain `sourceLineOffset`. It specifies the number of
+generated lines before the original source. The source starts at column zero,
+so an adapter can shift an existing source map without parsing the wrapper.
+
+The runtime import in the manifest must be bundled with the wrapper. Keeping it
+external can create a second hook registry at runtime. It is CommonJS and must
+go through the bundler's normal CommonJS transform.
+
 ## Synchronous loader hooks
 
 On Node.js versions that support
@@ -150,7 +231,7 @@ if (supportsSyncHooks()) {
 import { register } from 'import-in-the-middle/register-hooks.mjs'
 import { Hook } from 'import-in-the-middle'
 
-register({ include: ['package-i-want-to-include'] })
+register({ include: ['package-i-want-to-include'], commonjs: true })
 
 Hook(['package-i-want-to-include'], (exported, name, baseDir) => {
   // Instrument the module
@@ -163,6 +244,9 @@ node --import=./instrument.mjs ./my-app.mjs
 
 `register()` accepts the same `include` / `exclude` options as the asynchronous
 loader and throws on a Node.js version where `supportsSyncHooks()` is `false`.
+Set `commonjs: true` to intercept both `require()` and ESM loaded through
+`require()`. This is opt-in so consumers can continue using
+`require-in-the-middle` for CommonJS without double instrumentation.
 
 ### Custom matching with `shouldInclude`
 
@@ -254,7 +338,8 @@ On Node.js versions where type stripping is not enabled by default, run with
 * You cannot add new exports to a module. You can only modify existing ones.
 * While bindings to module exports end up being "re-bound" when modified in a
   hook, dynamically imported modules cannot be altered after they're loaded.
-* Modules loaded via `require` are not affected at all.
+* Modules loaded via `require` are only affected by synchronous registration
+  with `commonjs: true`.
 * A module's set of export *names* is assumed to be stable for the lifetime of
   the process. `import-in-the-middle` reads a module's source once to lex its
   exports and reuses that export set on later loads of the same URL. An upstream

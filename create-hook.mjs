@@ -5,8 +5,15 @@
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules } from 'module'
-import { getExports } from './lib/get-exports.mjs'
-import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
+import { readFileSync } from 'fs'
+import createGetNodeModuleFormat from './lib/get-node-module-format.js'
+import { driveSync, driveAsync } from './lib/io.mjs'
+import {
+  buildCommonJSWrapperSource,
+  buildWrapperSourceWithData,
+  processModule,
+  sourceToString
+} from './lib/wrapper.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 
 // Re-exported for backwards compatibility: `supportsSyncHooks` now lives in its
@@ -15,19 +22,14 @@ import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 export { supportsSyncHooks }
 
 const isWin = process.platform === 'win32'
-
-// Depth at which `processModule` starts tracking visited URLs to break an
-// `export *` cycle. Real re-export chains are only a few levels deep, so this
-// is far beyond any legitimate graph yet well below the call-stack limit a
-// cycle would otherwise hit. Below it the recursion pays only an integer
-// compare per level and allocates no set.
-const STAR_CYCLE_DEPTH = 100
+const getNodeModuleFormat = createGetNodeModuleFormat(readFileSync)
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
 const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
-// The full es-module-lexer build handles erasable TypeScript syntax in the same
-// pass as JavaScript, so the `-typescript` formats use the normal export path.
+const DATA_JAVASCRIPT_RE = /^(?:application|text)\/javascript(?:[;,])/i
+// The `-typescript` formats are listed unconditionally; getExports strips the
+// types when the runtime supports it and otherwise falls back to onWrapFailure.
 const HANDLED_FORMATS = new Set([
   'builtin', 'module', 'commonjs', 'module-typescript', 'commonjs-typescript'
 ])
@@ -36,12 +38,7 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 /** @typedef {import('node:module').LoadHookContext} LoadContext */
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
 /** @typedef {string | { specifier: string, format: 'module-typescript' | 'commonjs-typescript' }} SpecifierData */
-/** @typedef {{ name: string, origin: string }} StarBinding */
-/**
- * @typedef {object} ProcessResult
- * @property {string[] | Map<string, string | StarBinding>} bindings
- * @property {Map<string, string> | undefined} origins
- */
+/** @typedef {{ specifier: string, format?: string, originalUrl: string }} RequireSpecifierData */
 
 function hasIitm (url) {
   // Fast path: avoid URL parsing on the hot path when there's clearly no iitm.
@@ -83,34 +80,6 @@ function deleteIitm (url) {
   }
   Error.stackTraceLimit = stackTraceLimit
   return resultUrl
-}
-
-function isBareSpecifier (specifier) {
-  // Relative and absolute paths are not bare specifiers.
-  if (
-    specifier.startsWith('.') ||
-    specifier.startsWith('/')) {
-    return false
-  }
-
-  // Valid URLs are not bare specifiers. (file:, http:, node:, etc.)
-
-  // eslint-disable-next-line no-prototype-builtins
-  if (URL.hasOwnProperty('canParse')) {
-    return !URL.canParse(specifier)
-  }
-
-  const stackTraceLimit = Error.stackTraceLimit
-  try {
-    Error.stackTraceLimit = 0
-    // eslint-disable-next-line no-new
-    new URL(specifier)
-    return false
-  } catch (err) {
-    return true
-  } finally {
-    Error.stackTraceLimit = stackTraceLimit
-  }
 }
 
 /**
@@ -182,168 +151,6 @@ function emitWarning (err) {
   process.emitWarning(warnMessage)
 }
 
-/**
- * @param {string} name The exported name.
- * @param {string} sourceUrl The URL of the module that defines the export.
- */
-function shouldReexport (name, sourceUrl) {
-  return name !== 'module.exports' ||
-    (!sourceUrl.startsWith('node:') && !builtinModules.includes(sourceUrl))
-}
-
-/**
- * @param {string} name The exported name.
- * @param {string} sourceUrl The URL of the module that defines the export.
- */
-function shouldExcludeExport (name, sourceUrl) {
-  return name === 'default' || !shouldReexport(name, sourceUrl)
-}
-
-/**
- * Processes a module's exports and builds its wrapper bindings.
- *
- * Written as a "sans-io" generator (see `lib/io.mjs`): instead of calling the
- * loader's resolve/load hooks directly it `yield`s `[RESOLVE, ...]` to resolve
- * star re-exports and `[LOAD, ...]` (via {@link getExports}) to read source,
- * and is driven by either {@link driveSync} (for
- * `module.registerHooks`) or {@link driveAsync} (for `module.register`). The
- * body is identical for both, so there is a single implementation to maintain.
- *
- * @param {object} params
- * @param {string} params.srcUrl The full URL to the module to process.
- * @param {LoadContext} params.context Provided by the loaders API.
- * @param {boolean} [params.excludeDefault = false] Exclude the default export.
- * @param {number} [params.depth = 0] Star-re-export recursion depth. Used to
- * detect `export *` cycles (`a` re-exports `b`, `b` re-exports `a`) cheaply:
- * the acyclic common case pays only an integer compare per level, and the
- * cycle-tracking set is allocated only once recursion is implausibly deep.
- * @param {Set<string>} [params.seen] URLs currently on the recursion stack,
- * created lazily once `depth` crosses {@link STAR_CYCLE_DEPTH}. A URL is added
- * before descending into its subtree and removed once that subtree finishes, so
- * it tracks the active path rather than every URL ever visited.
- * @returns {Generator<Array, ProcessResult>}
- * A generator that yields I/O operations and ultimately returns the shimmed
- * bindings for all the exports from the module and any transitive export all
- * modules. `origins` (the defining module per `*`-sourced name) is `undefined`
- * for a module with no `export *`.
- */
-function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen }) {
-  const { exportNames, starReexports } = yield * getExports(srcUrl, context)
-
-  // Most modules have no export star. Keep that path array-backed so it pays
-  // neither merge bookkeeping nor a Map lookup for each direct export.
-  if (starReexports === undefined) {
-    if (!excludeDefault) {
-      return { bindings: exportNames, origins: undefined }
-    }
-
-    const bindings = []
-    for (const name of exportNames) {
-      if (shouldExcludeExport(name, srcUrl)) continue
-      bindings.push(name)
-    }
-    return { bindings, origins: undefined }
-  }
-
-  const bindings = new Map()
-
-  // Maps each live `*`-sourced name to the module that defined it. Its keys
-  // double as "this name came from a `*` re-export" (so an explicit export can
-  // override it), and its values let two `*` re-exports of the same name be told
-  // apart. Allocated on the first `export *`, never for a module without one; a
-  // single Map carries both facts so a star with no collision pays one structure
-  // and one write per name, not two.
-  let starOrigins
-  let ambiguousStars
-  let firstStarUrl
-  let processedStarUrls
-
-  for (const name of exportNames) {
-    if (excludeDefault && shouldExcludeExport(name, srcUrl)) continue
-    bindings.set(name, name)
-  }
-
-  for (const { specifier, parentURL } of starReexports) {
-    // Relative paths need to be resolved relative to the module declaring the star.
-    const newSpecifier = isBareSpecifier(specifier) ? specifier : new URL(specifier, parentURL).href
-    // We need to resolve bare specifiers to a full URL. We also need to
-    // resolve all sub-modules to get the `format`. We can't rely on the
-    // parent's `format` to know if this sub-module is ESM or CJS!
-    const result = yield [RESOLVE, newSpecifier, { parentURL }]
-
-    // Most star modules have one target. Defer the collection until a second
-    // distinct target while still ignoring repeated declarations.
-    if (firstStarUrl === undefined) {
-      firstStarUrl = result.url
-    } else if (processedStarUrls === undefined) {
-      if (result.url === firstStarUrl) continue
-      processedStarUrls = [firstStarUrl, result.url]
-    } else {
-      if (processedStarUrls.includes(result.url)) continue
-      processedStarUrls.push(result.url)
-    }
-
-    // First `*` re-export: allocate the origin bookkeeping lazily.
-    starOrigins ??= new Map()
-
-    // `export *` graphs are normally only a handful of levels deep. A cycle
-    // (`a` re-exports `b`, `b` re-exports `a`) instead recurses without bound
-    // and exhausts memory. Rather than track every URL on the common shallow
-    // path, only start recording once the depth is implausibly large for a
-    // real graph; from there a re-export pointing back at a module already on
-    // the recursion stack is the cycle, and is skipped (its exports are
-    // collected by the in-progress ancestor frame). `seen` mirrors the stack,
-    // not every URL visited: a module reached and fully processed through one
-    // sibling branch must stay reachable through a later, more direct branch,
-    // so it is removed again once its subtree finishes.
-    if (depth >= STAR_CYCLE_DEPTH) {
-      seen ??= new Set()
-      if (seen.has(result.url)) continue
-      seen.add(result.url)
-    }
-
-    try {
-      const sub = yield * processModule({
-        srcUrl: result.url,
-        context: { ...context, format: result.format },
-        excludeDefault: true,
-        depth: depth + 1,
-        seen
-      })
-
-      for (const binding of sub.bindings.values()) {
-        const directName = typeof binding === 'string' ? binding : undefined
-        const name = directName ?? binding.name
-        if (ambiguousStars?.has(name)) continue
-
-        const origin = directName === undefined ? binding.origin : sub.origins?.get(name) ?? result.url
-        if (bindings.has(name)) {
-          // An explicit export shadows every star re-export.
-          if (!starOrigins.has(name)) continue
-
-          if (starOrigins.get(name) === origin) {
-            // IITM's aggregate namespace sees the wrapped paths as ambiguous.
-            // Retain the defining URL so source generation can import it once.
-            bindings.set(name, { name, origin })
-          } else {
-            bindings.delete(name)
-            starOrigins.delete(name)
-            ambiguousStars ??= new Set()
-            ambiguousStars.add(name)
-          }
-        } else {
-          starOrigins.set(name, origin)
-          bindings.set(name, binding)
-        }
-      }
-    } finally {
-      seen?.delete(result.url)
-    }
-  }
-
-  return { bindings, origins: starOrigins }
-}
-
 function addIitm (url) {
   const urlObj = new URL(url)
   urlObj.searchParams.set('iitm', 'true')
@@ -351,11 +158,23 @@ function addIitm (url) {
 }
 
 /**
- * @param {{ url: string }} meta
+ * @param {string} url
+ * @returns {boolean}
  */
-export function createHook (meta) {
+function isJavaScriptUrl (url) {
+  const urlObj = new URL(url)
+  return urlObj.protocol === 'node:' || EXTENSION_RE.test(urlObj.pathname) ||
+    (urlObj.protocol === 'data:' && DATA_JAVASCRIPT_RE.test(urlObj.pathname))
+}
+
+/**
+ * @param {{ url: string }} meta
+ * @param {boolean} [commonjs] Whether to create CommonJS-specific synchronous hooks.
+ */
+export function createHook (meta, commonjs) {
   /** @type {Map<string, SpecifierData>} */
   const specifiers = new Map()
+  let commonJsSpecifiers
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   let includeModules, excludeModules
@@ -415,6 +234,7 @@ export function createHook (meta) {
   function applyOptions (data) {
     includeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.include, 'include')
     excludeModules = ensureArrayWithBareSpecifiersFileUrlsAndRegex(data.exclude, 'exclude')
+    disableCjsSourceStripping = data.disableCjsSourceStripping === true
 
     // A consumer can supply its own matcher as `shouldInclude(url, specifier)`,
     // taking ownership of the include/exclude decision instead of expressing it
@@ -422,10 +242,6 @@ export function createHook (meta) {
     // matcher and is called with the resolved URL and specifier; otherwise the
     // default applies the include/exclude options.
     shouldInclude = typeof data.shouldInclude === 'function' ? data.shouldInclude : defaultShouldInclude
-
-    if (data.disableCjsSourceStripping === true) {
-      disableCjsSourceStripping = true
-    }
 
     if (data.addHookMessagePort) {
       data.addHookMessagePort.on('message', (modules) => {
@@ -549,6 +365,60 @@ export function createHook (meta) {
     }
   }
 
+  /**
+   * @param {{ url: string, format?: string }} result
+   * @param {string} specifier
+   * @param {object} context
+   * @param {string} parentURL
+   * @returns {object}
+   */
+  let finishRequireResolve
+  if (commonjs === true) {
+    finishRequireResolve = (result, specifier, context, parentURL) => {
+      if (parentURL === '') {
+        if (!EXTENSION_RE.test(result.url) && !hasIitm(result.url)) {
+          return { url: result.url, format: 'commonjs' }
+        }
+        return result
+      }
+
+      if (result.format && !HANDLED_FORMATS.has(result.format)) return result
+      if (!shouldInclude(result.url, specifier)) return result
+      if (isIitm(parentURL, meta) || (parentURL && hasIitm(parentURL))) return result
+      if (cjsInIitmChain.has(parentURL)) {
+        cjsInIitmChain.add(result.url)
+        return result
+      }
+      if (result.url.endsWith('.node')) return result
+
+      const importAttributes = context.importAttributes || context.importAssertions
+      if (importAttributes && importAttributes.type === 'json') return result
+      if (result.url === parentURL) {
+        return {
+          url: result.url,
+          shortCircuit: true,
+          format: result.format
+        }
+      }
+
+      const format = result.format ?? getNodeModuleFormat(result.url)
+      if (format === 'module' || format === 'module-typescript') {
+        const specifierData = format === 'module-typescript' ? { specifier, format } : specifier
+        specifiers.set(result.url, specifierData)
+        return {
+          url: addIitm(result.url),
+          shortCircuit: true,
+          format
+        }
+      }
+
+      commonJsSpecifiers ??= new Map()
+      const wrapperUrl = format === undefined && isJavaScriptUrl(result.url) ? addIitm(result.url) : result.url
+      commonJsSpecifiers.set(wrapperUrl, { specifier, format, originalUrl: result.url })
+      return wrapperUrl === result.url ? result : { ...result, url: wrapperUrl }
+    }
+  }
+
   async function resolve (specifier, context, parentResolve) {
     cachedResolve = parentResolve
 
@@ -595,99 +465,53 @@ export function createHook (meta) {
   }
 
   /**
-   * Builds the wrapper module source shared by the asynchronous and synchronous hooks.
-   *
-   * @param {string} realUrl The URL of the wrapped module.
-   * @param {string[] | Map<string, string | StarBinding>} bindings Its exported bindings.
-   * @param {string} originalSpecifier The specifier used to import the module.
+   * @param {string} specifier
+   * @param {object} context
+   * @param {Function} nextResolve
+   * @returns {object}
    */
-  function buildWrapperSource (realUrl, bindings, originalSpecifier) {
-    // The wrapped module imports its namespace as `namespace`, which serves
-    // every export but the ones a same-origin `export *` collision forced onto
-    // their defining module (#171): the aggregate namespace drops those as
-    // ambiguous under iitm, so each such defining module gets its own alias the
-    // wrapper imports. Without such a collision nothing is added.
-    let originImports = ''
-    let originNamespaces
-    let declarationNames = ''
-    let bindingNames = ''
-    let bindingSources
-    let exportSpecifiers = ''
-    let writeCases = ''
-    let index = 0
-    for (const binding of bindings.values()) {
-      const directName = typeof binding === 'string' ? binding : undefined
-      const name = directName ?? binding.name
-      let namespaceName = 'namespace'
-      if (directName === undefined) {
-        originNamespaces ??= new Map()
-        namespaceName = originNamespaces.get(binding.origin)
-        if (namespaceName === undefined) {
-          namespaceName = `__ns${originNamespaces.size}`
-          originNamespaces.set(binding.origin, namespaceName)
-          originImports += `import * as ${namespaceName} from ${JSON.stringify(binding.origin)}\n`
+  let resolveSyncCommonJS
+  if (commonjs === true) {
+    resolveSyncCommonJS = (specifier, context, nextResolve) => {
+      cachedResolve = nextResolve
+
+      if (specifier === iitmURL) {
+        return {
+          url: specifier,
+          shortCircuit: true
         }
       }
-      const variableName = `$${index}`
-      const objectKey = JSON.stringify(name)
-      declarationNames += declarationNames === '' ? variableName : `, ${variableName}`
-      bindingNames += bindingNames === '' ? objectKey : `, ${objectKey}`
-      if (bindingSources !== undefined) bindingSources += ', '
-      if (namespaceName !== 'namespace') {
-        bindingSources ??= 'undefined, '.repeat(index)
-        bindingSources += namespaceName
-      } else if (bindingSources !== undefined) {
-        bindingSources += 'undefined'
+
+      const { parentURL = '' } = context
+      const newSpecifier = deleteIitm(specifier)
+      if (process.platform === 'win32' && parentURL.indexOf('file:node') === 0) {
+        context.parentURL = ''
       }
-      writeCases += `    case ${index++}: ${variableName} = value; break\n`
-      if (shouldReexport(name, realUrl)) {
-        const exportName = name === 'default' ? name : objectKey
-        exportSpecifiers += exportSpecifiers === ''
-          ? `${variableName} as ${exportName}`
-          : `, ${variableName} as ${exportName}`
+      const result = nextResolve(newSpecifier, context)
+      if (!context.conditions?.includes('require')) {
+        return finishResolve(result, specifier, context, parentURL)
       }
+      return finishRequireResolve(result, specifier, context, parentURL)
     }
-    const binder = declarationNames === ''
-      ? 'const __binder = new ModuleBinder(namespace)\n'
-      : `let ${declarationNames}
-function __write (index, value) {
-  switch (index) {
-${writeCases}  }
-}
-const __binder = new ModuleBinder(namespace, [${bindingNames}], __write${bindingSources === undefined
-  ? ''
-  : `, [${bindingSources}]`})
-`
-    const reexports = exportSpecifiers === '' ? '' : `export { ${exportSpecifiers} }\n`
-
-    return `
-import { register, ModuleBinder } from ${JSON.stringify(iitmURL)}
-import * as namespace from ${JSON.stringify(realUrl)}
-${originImports}
-${binder}
-${reexports}
-
-__binder.flush()
-
-register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifier)})
-`
   }
 
-  /**
-   * Finalizes a successful wrap and builds its module source.
-   *
-   * @param {string} realUrl The URL of the wrapped module.
-   * @param {LoadContext} context Its loader context.
-   * @param {string} originalSpecifier The original import specifier.
-   * @param {string[] | Map<string, string | StarBinding>} bindings Its exported bindings.
-   */
+  // Bookkeeping shared by the async and sync wrap paths once `processModule`
+  // succeeds: free the specifier entry early, and remember CJS modules so their
+  // transitive require() chain bypasses iitm (see `load`). Returns the wrapper
+  // module source.
   function onWrapSuccess (realUrl, context, originalSpecifier, bindings) {
     specifiers.delete(realUrl)
     // context.format is set to 'commonjs' by getCjsExports during processModule.
     if (context.format === 'commonjs') {
       cjsInIitmChain.add(realUrl)
     }
-    return buildWrapperSource(realUrl, bindings, originalSpecifier)
+    return buildWrapperSourceWithData({
+      realUrl,
+      bindings,
+      originalSpecifier,
+      data: undefined,
+      runtimeSpecifier: iitmURL
+    })
   }
 
   // Bookkeeping shared by the async and sync wrap paths when `processModule`
@@ -695,15 +519,100 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
   // (it just can't be Hook'ed) rather than taking down the whole app. We free
   // the specifier entry to avoid a leak, and log because a failure here is
   // usually an iitm bug and would otherwise be very tricky to debug.
-  /**
-   * @param {string} realUrl The URL whose wrapper could not be built.
-   * @param {unknown} cause The parse or wrapper-generation failure.
-   */
   function onWrapFailure (realUrl, cause) {
     specifiers.delete(realUrl)
     const err = new Error(`'import-in-the-middle' failed to wrap '${realUrl}'`)
     err.cause = cause
     emitWarning(err)
+  }
+
+  /**
+   * @param {string} url
+   * @param {LoadContext} context
+   * @param {LoadResult} result
+   * @param {RequireSpecifierData} specifierData
+   * @param {(url: string, context?: Partial<LoadContext>) => LoadResult} nextLoad
+   * @returns {LoadResult}
+   */
+  let wrapRequireLoad
+  if (commonjs === true) {
+    wrapRequireLoad = (url, context, result, specifierData, nextLoad) => {
+      let format = result.format ?? specifierData.format
+      let source = result.source
+
+      if (format === undefined && source == null && url.startsWith('file:')) {
+        source = process.getBuiltinModule('fs').readFileSync(fileURLToPath(url))
+      }
+
+      if (format === 'module' || format === 'module-typescript' ||
+          (format === undefined && isJavaScriptUrl(url))) {
+        const processContext = { ...context, format }
+        const loaded = source === result.source ? result : { ...result, source }
+        /**
+         * @param {string} loadUrl
+         * @param {Partial<LoadContext>} loadContext
+         * @returns {LoadResult}
+         */
+        const loadModule = (loadUrl, loadContext) => {
+          return loadUrl === url ? loaded : nextLoad(loadUrl, loadContext)
+        }
+        try {
+          const { bindings } = driveSync(
+            processModule({ srcUrl: url, context: processContext }),
+            { resolve: cachedResolve, load: loadModule }
+          )
+          if (processContext.format === 'commonjs') {
+            format = 'commonjs'
+            cjsInIitmChain.add(url)
+          } else {
+            return {
+              ...result,
+              format: 'module',
+              source: onWrapSuccess(url, processContext, specifierData.specifier, bindings),
+              shortCircuit: true
+            }
+          }
+        } catch (cause) {
+          onWrapFailure(url, cause)
+          return result
+        }
+      }
+
+      if (url.startsWith('node:')) {
+        source = `module.exports = process.getBuiltinModule(${JSON.stringify(url)})\n`
+      } else if ((format === 'commonjs' || format === 'commonjs-typescript') && source == null &&
+               url.startsWith('file:')) {
+        source = process.getBuiltinModule('fs').readFileSync(fileURLToPath(url))
+      }
+
+      if (source == null || (format !== 'commonjs' && format !== 'commonjs-typescript' &&
+                           !url.startsWith('node:'))) {
+        return result
+      }
+
+      try {
+        if (format === 'commonjs-typescript') {
+          const stripTypeScriptTypes = process.getBuiltinModule('module').stripTypeScriptTypes
+          if (stripTypeScriptTypes !== undefined) {
+            source = stripTypeScriptTypes(sourceToString(source), { mode: 'strip' })
+          }
+        }
+        return {
+          ...result,
+          format: 'commonjs',
+          source: buildCommonJSWrapperSource({
+            realUrl: url,
+            source,
+            originalSpecifier: specifierData.specifier,
+            runtimeSpecifier: fileURLToPath(iitmURL)
+          }),
+          shortCircuit: true
+        }
+      } catch (cause) {
+        onWrapFailure(url, cause)
+        return result
+      }
+    }
   }
 
   /**
@@ -727,10 +636,36 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
         processContext = { ...context, format: specifierData.format }
       }
 
+      let loadModule = parentGetSource
+      if (processContext.format === undefined && !isJavaScriptUrl(realUrl)) {
+        let result
+        try {
+          result = await parentGetSource(realUrl, processContext)
+        } catch (cause) {
+          specifiers.delete(realUrl)
+          throw cause
+        }
+        if (result.format !== undefined && !HANDLED_FORMATS.has(result.format)) {
+          specifiers.delete(realUrl)
+          return result
+        }
+        if (result.format !== undefined) processContext = { ...processContext, format: result.format }
+
+        /**
+         * @param {string} loadUrl
+         * @param {Partial<LoadContext>} loadContext
+         * @returns {LoadResult|Promise<LoadResult>}
+         */
+        const loadPreloadedModule = (loadUrl, loadContext) => {
+          return loadUrl === realUrl ? result : parentGetSource(loadUrl, loadContext)
+        }
+        loadModule = loadPreloadedModule
+      }
+
       try {
         const { bindings } = await driveAsync(
           processModule({ srcUrl: realUrl, context: processContext }),
-          { resolve: cachedResolve, load: parentGetSource }
+          { resolve: cachedResolve, load: loadModule }
         )
         return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
       } catch (cause) {
@@ -767,10 +702,36 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
         processContext = { ...context, format: specifierData.format }
       }
 
+      let loadModule = nextLoad
+      if (processContext.format === undefined && !isJavaScriptUrl(realUrl)) {
+        let result
+        try {
+          result = nextLoad(realUrl, processContext)
+        } catch (cause) {
+          specifiers.delete(realUrl)
+          throw cause
+        }
+        if (result.format !== undefined && !HANDLED_FORMATS.has(result.format)) {
+          specifiers.delete(realUrl)
+          return result
+        }
+        if (result.format !== undefined) processContext = { ...processContext, format: result.format }
+
+        /**
+         * @param {string} loadUrl
+         * @param {Partial<LoadContext>} loadContext
+         * @returns {LoadResult}
+         */
+        const loadPreloadedModule = (loadUrl, loadContext) => {
+          return loadUrl === realUrl ? result : nextLoad(loadUrl, loadContext)
+        }
+        loadModule = loadPreloadedModule
+      }
+
       try {
         const { bindings } = driveSync(
           processModule({ srcUrl: realUrl, context: processContext }),
-          { resolve: cachedResolve, load: nextLoad }
+          { resolve: cachedResolve, load: loadModule }
         )
         return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
       } catch (cause) {
@@ -785,6 +746,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
   async function load (url, context, parentLoad) {
     if (hasIitm(url)) {
       const result = await getSource(url, context, parentLoad)
+      if (result?.format && !HANDLED_FORMATS.has(result.format)) return result
       // If wrapping failed, `getSource()` may have fallen back to `parentLoad`,
       // which can legally return `source: null` (e.g. for non-JS formats).
       if (result && typeof result === 'object' && result.source != null) {
@@ -826,6 +788,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
   function loadSync (url, context, nextLoad) {
     if (hasIitm(url)) {
       const result = getSourceSync(url, context, nextLoad)
+      if (result?.format && !HANDLED_FORMATS.has(result.format)) return result
       // If wrapping failed, `getSourceSync()` may have fallen back to `nextLoad`,
       // which can legally return `source: null` (e.g. for non-JS formats).
       if (result && typeof result === 'object' && result.source != null) {
@@ -854,5 +817,45 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
     return nextLoad(url, context)
   }
 
+  /**
+   * @param {string} url
+   * @param {LoadContext} context
+   * @param {(url: string, context?: Partial<LoadContext>) => LoadResult} nextLoad
+   * @returns {LoadResult}
+   */
+  let loadSyncCommonJS
+  if (commonjs === true) {
+    loadSyncCommonJS = (url, context, nextLoad) => {
+      const specifierData = commonJsSpecifiers?.get(url)
+      if (specifierData !== undefined) {
+        let result
+        try {
+          result = nextLoad(specifierData.originalUrl, context)
+        } catch (error) {
+          commonJsSpecifiers.delete(url)
+          throw error
+        }
+        commonJsSpecifiers.delete(url)
+        return wrapRequireLoad(specifierData.originalUrl, context, result, specifierData, nextLoad)
+      }
+
+      if (hasIitm(url)) return loadSync(url, context, nextLoad)
+
+      return loadSync(url, context, nextLoad)
+    }
+  }
+
+  if (commonjs === true) {
+    return {
+      initialize,
+      load,
+      resolve,
+      resolveSync,
+      resolveSyncCommonJS,
+      loadSync,
+      loadSyncCommonJS,
+      applyOptions
+    }
+  }
   return { initialize, load, resolve, resolveSync, loadSync, applyOptions }
 }

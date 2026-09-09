@@ -1,71 +1,86 @@
-import { spawn, execSync } from 'child_process'
-import { existsSync } from 'fs'
-import { strictEqual } from 'assert'
-import { fileURLToPath } from 'url'
-import path from 'path'
+import { deepStrictEqual } from 'node:assert/strict'
+import { execSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
+import { fileURLToPath } from 'node:url'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const appDir = path.resolve(__dirname, '..', 'fixtures', 'test-nextjs-app')
-const iitmDir = path.resolve(__dirname, '..', '..')
-const hookSetup = path.join(appDir, 'iitm-hook-setup.cjs')
-const PORT = 3099
+import { runTurbopackServer } from './turbopack-server.mjs'
+import {
+  prepareTurbopackWrapper,
+  removeTurbopackWrapper,
+  updateTurbopackSource
+} from './turbopack-wrapper.mjs'
 
-if (!existsSync(path.join(appDir, 'node_modules'))) {
+const directory = path.dirname(fileURLToPath(import.meta.url))
+const appDirectory = path.resolve(directory, '..', 'fixtures', 'test-nextjs-app')
+const iitmDirectory = path.resolve(directory, '..', '..')
+const hookSetup = path.join(appDirectory, 'iitm-hook-setup.cjs')
+const nextBin = path.join(appDirectory, 'node_modules', '.bin', 'next')
+const port = 3099
+
+if (!existsSync(path.join(appDirectory, 'node_modules'))) {
   console.log('Installing Next.js app dependencies')
-  execSync('npm install', { cwd: appDir })
+  execSync('npm install', { cwd: appDirectory })
 }
 
-const hookTriggered = await new Promise((resolve, reject) => {
-  console.log(`Starting Next.js server on port ${PORT} via \`next dev\``)
-  const server = spawn(
-    path.join(appDir, 'node_modules', '.bin', 'next'),
-    ['dev', '--port', String(PORT)],
-    {
-      cwd: appDir,
-      env: {
-        ...process.env,
-        NODE_OPTIONS: `--no-warnings --experimental-loader ${path.join(iitmDir, 'hook.mjs')} --require ${hookSetup}`,
-        IITM_PATH: path.join(iitmDir, 'index.js')
-      }
-    }
-  )
+await prepareTurbopackWrapper(appDirectory, 41)
+try {
+  console.log(`Starting Next.js server on port ${port} via \`next dev --turbopack\``)
+  await runTurbopackServer({
+    appDirectory,
+    arguments: ['dev', '--turbopack', '--port', String(port)],
+    hookSetup,
+    iitmDirectory,
+    nextBin,
+    port
+  }, verifyRoute)
+} finally {
+  await removeTurbopackWrapper(appDirectory)
+}
 
-  let output = ''
-  let hookSeen = false
-  let requestMade = false
+/**
+ * @param {string} url The application route URL.
+ * @returns {Promise<void>}
+ */
+async function verifyRoute (url) {
+  deepStrictEqual(await fetchResult(url), expectedResult(41))
+  await updateTurbopackSource(appDirectory, 51)
+  deepStrictEqual(await waitForRebuild(url), expectedResult(51))
+}
 
-  function onData (chunk) {
-    const text = chunk.toString()
-    output += text
+/**
+ * @param {string} url The application route URL.
+ * @returns {Promise<Record<string, number>>}
+ */
+async function fetchResult (url) {
+  const response = await fetch(url)
+  return response.json()
+}
 
-    if (!requestMade && /ready/i.test(text)) {
-      requestMade = true
-      console.log('Server is ready, hitting /api/foo')
-      fetch(`http://localhost:${PORT}/api/foo`).catch(() => {})
-    }
-
-    if (!hookSeen && output.includes('IITM_HOOK_TRIGGERED:camelcase')) {
-      hookSeen = true
-      server.kill()
-      resolve(true)
-    }
+/**
+ * @param {string} url The application route URL.
+ * @returns {Promise<Record<string, number>>}
+ */
+async function waitForRebuild (url) {
+  let result
+  for (let attempt = 0; attempt < 100; attempt++) {
+    await delay(100)
+    result = await fetchResult(url)
+    if (result.initialLive === 51) return result
   }
+  throw new Error(`Turbopack did not rebuild the wrapper dependency: ${JSON.stringify(result)}`)
+}
 
-  server.stdout.on('data', onData)
-  server.stderr.on('data', onData)
-  server.on('error', reject)
-  server.on('close', () => {
-    if (!hookSeen) {
-      reject(new Error(`Hook was not triggered. Output:\n${output}`))
-    }
-  })
-
-  setTimeout(() => {
-    if (!hookSeen) {
-      server.kill()
-      reject(new Error(`Timed out waiting for hook. Output:\n${output}`))
-    }
-  }, 30_000)
-})
-
-strictEqual(hookTriggered, true)
+/**
+ * @param {number} initialLive The dependency's initial live export.
+ * @returns {{ initialLive: number, live: number, stable: number, hookedLive: number }}
+ */
+function expectedResult (initialLive) {
+  return {
+    initialLive,
+    live: initialLive + 1,
+    stable: 43,
+    hookedLive: initialLive + 1
+  }
+}

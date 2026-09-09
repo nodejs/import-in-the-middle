@@ -32,6 +32,21 @@ assert.deepEqual(lexEsm('export const direct = 1; export * from "dependency"', '
   starReexports: [{ specifier: 'dependency', parentURL: 'file:///parent.mjs' }],
   hasModuleSyntax: true
 })
+assert.deepEqual(lexEsm(`
+  export let direct = 1
+  const local = 2
+  export { local as alias }
+  export { remote as renamed } from './dependency.mjs'
+  import { imported as detached } from './dependency.mjs'
+  export { detached }
+  export * as namespace from './dependency.mjs'
+`, 'file:///parent.mjs', true).exportDeclarations, new Map([
+  ['direct', { type: 'direct', name: 'direct', localName: 'direct' }],
+  ['alias', { type: 'direct', name: 'alias', localName: 'local' }],
+  ['renamed', { type: 'reexport', name: 'renamed', importName: 'remote', specifier: './dependency.mjs' }],
+  ['detached', { type: 'reexport', name: 'detached', importName: 'imported', specifier: './dependency.mjs' }],
+  ['namespace', { type: 'reexport', name: 'namespace', specifier: './dependency.mjs' }]
+]))
 
 // // Generate fixture data
 // fixture.split('\n').forEach(line => {

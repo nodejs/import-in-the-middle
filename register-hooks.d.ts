@@ -7,6 +7,7 @@ export type RegisterHooksOptions = {
   include?: Array<string | RegExp>
   exclude?: Array<string | RegExp>
   disableCjsSourceStripping?: boolean
+  commonjs?: boolean
 }
 
 /**
