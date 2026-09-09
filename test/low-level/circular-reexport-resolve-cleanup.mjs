@@ -365,3 +365,90 @@ pendingInstallSignal.emit('resolved', {
 })
 const pendingInstallCycle = await pendingInstallResolve
 strictEqual(pendingInstallCycle.url, pendingInstallLoader.rootURLs[0])
+
+const concurrentLoadExistingRootURL = 'file:///async-concurrent-load-existing-root.mjs'
+const concurrentLoadRootURL = 'file:///async-concurrent-load-root.mjs'
+const concurrentLoadLeafURL = 'file:///async-concurrent-load-leaf.mjs'
+const concurrentLoadExistingBackEdge = './async-concurrent-load-existing-root.mjs'
+const concurrentLoadBackEdge = './async-concurrent-load-root.mjs'
+const concurrentLoadSources = new Map([
+  [concurrentLoadExistingRootURL, "export * from './async-concurrent-load-leaf.mjs'"],
+  [concurrentLoadRootURL, "export * from './async-concurrent-load-leaf.mjs'"],
+  [concurrentLoadLeafURL, `
+import '${concurrentLoadExistingBackEdge}'
+import '${concurrentLoadBackEdge}'
+export const value = 1
+`]
+])
+const concurrentLoadSignal = new EventEmitter()
+let pauseConcurrentLoad = false
+
+/**
+ * @param {string} specifier The module specifier.
+ * @param {{ parentURL?: string }} context The resolve context.
+ */
+async function resolveConcurrentLoad (specifier, context) {
+  if (pauseConcurrentLoad && specifier === concurrentLoadLeafURL) {
+    pauseConcurrentLoad = false
+    concurrentLoadSignal.emit('pending')
+    await once(concurrentLoadSignal, 'continue')
+  }
+  return { url: new URL(specifier, context.parentURL).href, format: 'module', shortCircuit: true }
+}
+
+/** @param {string} url The module URL. */
+function loadConcurrentModule (url) {
+  return { format: 'module', source: concurrentLoadSources.get(url), shortCircuit: true }
+}
+
+const concurrentLoadHook = createHook(meta)
+const concurrentLoadExistingWrapper = await concurrentLoadHook.resolve(
+  concurrentLoadExistingRootURL,
+  { parentURL: 'file:///async-concurrent-load-existing-entry.mjs', conditions },
+  resolveConcurrentLoad
+)
+await concurrentLoadHook.load(
+  concurrentLoadExistingWrapper.url,
+  { format: 'module' },
+  loadConcurrentModule
+)
+const concurrentLoadConsumedCycle = await concurrentLoadHook.resolve(
+  concurrentLoadBackEdge,
+  { parentURL: concurrentLoadLeafURL, conditions },
+  () => ({ url: concurrentLoadExistingRootURL, format: 'module', shortCircuit: true })
+)
+strictEqual(concurrentLoadConsumedCycle.url, concurrentLoadExistingRootURL)
+
+const concurrentLoadWrapper = await concurrentLoadHook.resolve(
+  concurrentLoadRootURL,
+  { parentURL: 'file:///async-concurrent-load-entry.mjs', conditions },
+  resolveConcurrentLoad
+)
+pauseConcurrentLoad = true
+const concurrentScanPending = once(concurrentLoadSignal, 'pending')
+const concurrentLoad = concurrentLoadHook.load(
+  concurrentLoadWrapper.url,
+  { format: 'module' },
+  loadConcurrentModule
+)
+await concurrentScanPending
+const concurrentResolve = await concurrentLoadHook.resolve(
+  concurrentLoadBackEdge,
+  { parentURL: concurrentLoadLeafURL, conditions },
+  resolveConcurrentLoad
+)
+strictEqual(new URL(concurrentResolve.url).searchParams.get('iitm'), 'true')
+concurrentLoadSignal.emit('continue')
+await concurrentLoad
+const concurrentRetry = await concurrentLoadHook.resolve(
+  concurrentLoadBackEdge,
+  { parentURL: concurrentLoadLeafURL, conditions },
+  resolveConcurrentLoad
+)
+strictEqual(new URL(concurrentRetry.url).searchParams.get('iitm'), 'true')
+const concurrentExistingRetry = await concurrentLoadHook.resolve(
+  concurrentLoadExistingBackEdge,
+  { parentURL: concurrentLoadLeafURL, conditions },
+  resolveConcurrentLoad
+)
+strictEqual(concurrentExistingRetry.url, concurrentLoadExistingRootURL)
