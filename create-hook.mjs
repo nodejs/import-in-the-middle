@@ -469,6 +469,7 @@ export function createHook (meta) {
       specifierParentURL = undefined
       return parentURL
     }
+    if (specifierParents === undefined) return
     const parentURL = specifierParents.get(url)
     specifierParents.delete(url)
     if (specifierParents.size === 0) specifierParents = undefined
@@ -753,13 +754,17 @@ export function createHook (meta) {
           ? previousSpecifierData
           : previousSpecifierData.specifier
         const previousParentURL = takeSpecifierParent(result.url)
-        if (previousSpecifier === specifier && previousParentURL === parentURL) {
+        if (previousParentURL === undefined) {
+          entries = [{ specifier, parentURL }]
+        } else if (previousSpecifier === specifier && previousParentURL === parentURL) {
           storeSpecifierParent(result.url, parentURL)
         } else {
           entries = [
             { specifier: previousSpecifier, parentURL: previousParentURL },
             { specifier, parentURL }
           ]
+        }
+        if (entries !== undefined) {
           duplicateSpecifiers ??= new Map()
           duplicateSpecifiers.set(result.url, entries)
         }
@@ -995,11 +1000,21 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
           processModule({ srcUrl: realUrl, context: processContext }),
           { resolve: cachedResolve, load: parentGetSource }
         )
+        const racedEntries = takeDuplicateSpecifiers(realUrl)
         const source = onWrapSuccess(realUrl, format, originalSpecifier, bindings)
-        const initiatingImports = duplicateEntries ?? { specifier: originalSpecifier, parentURL }
+        let initiatingImports = duplicateEntries ?? { specifier: originalSpecifier, parentURL }
+        if (racedEntries !== undefined) {
+          if (Array.isArray(initiatingImports)) {
+            for (const entry of racedEntries) initiatingImports.push(entry)
+          } else {
+            racedEntries.push(initiatingImports)
+            initiatingImports = racedEntries
+          }
+        }
         mergeCyclicImports(cyclicImports, initiatingImports, realUrl)
         return { source }
       } catch (cause) {
+        takeDuplicateSpecifiers(realUrl)
         onWrapFailure(realUrl, cause)
         // Revert back to the non-iitm URL
         url = realUrl
