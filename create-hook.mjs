@@ -5,7 +5,7 @@
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules } from 'module'
-import { getExports } from './lib/get-exports.mjs'
+import { getModuleExports } from './lib/get-exports.mjs'
 import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 
@@ -204,7 +204,7 @@ function shouldExcludeExport (name, sourceUrl) {
  *
  * Written as a "sans-io" generator (see `lib/io.mjs`): instead of calling the
  * loader's resolve/load hooks directly it `yield`s `[RESOLVE, ...]` to resolve
- * star re-exports and `[LOAD, ...]` (via {@link getExports}) to read source,
+ * star re-exports and `[LOAD, ...]` (via {@link getModuleExports}) to read source,
  * and is driven by either {@link driveSync} (for
  * `module.registerHooks`) or {@link driveAsync} (for `module.register`). The
  * body is identical for both, so there is a single implementation to maintain.
@@ -228,7 +228,7 @@ function shouldExcludeExport (name, sourceUrl) {
  * for a module with no `export *`.
  */
 function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen }) {
-  const { exportNames, starReexports } = yield * getExports(srcUrl, context)
+  const { exportNames, starReexports } = yield * getModuleExports(srcUrl, context)
 
   // Most modules have no export star. Keep that path array-backed so it pays
   // neither merge bookkeeping nor a Map lookup for each direct export.

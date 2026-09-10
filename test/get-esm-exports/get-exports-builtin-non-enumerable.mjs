@@ -24,7 +24,7 @@ const nonEnumerableNames = Object.getOwnPropertyNames(moduleValue)
 
 const io = { load: async () => ({ source: null, format: 'builtin' }) }
 
-const { exportNames } = await driveAsync(getExports(builtin, { format: 'builtin' }), io)
+const exportNames = await driveAsync(getExports(builtin, { format: 'builtin' }), io)
 
 // The whole point: non-enumerable own properties (e.g. `prototype`) that
 // Object.keys would miss must still be discovered.
