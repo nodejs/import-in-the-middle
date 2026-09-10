@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.5.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.5.0...import-in-the-middle-v3.5.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* restore legacy bundler compatibility ([#294](https://github.com/nodejs/import-in-the-middle/issues/294)) ([41d8504](https://github.com/nodejs/import-in-the-middle/commit/41d8504de84bb0794ed05e112fc46f9aafada167))
+
 ## [3.5.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.4.0...import-in-the-middle-v3.5.0) (2026-09-08)
 
 
