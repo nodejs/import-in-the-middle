@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.5.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.5.1...import-in-the-middle-v3.5.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* remove duplicate TypeScript export names ([#298](https://github.com/nodejs/import-in-the-middle/issues/298)) ([bd446a8](https://github.com/nodejs/import-in-the-middle/commit/bd446a8a2f4153b40629452f2362e024b9f9a023))
+
 ## [3.5.1](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.5.0...import-in-the-middle-v3.5.1) (2026-09-10)
 
 
