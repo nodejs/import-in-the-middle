@@ -26,8 +26,8 @@ const STAR_CYCLE_DEPTH = 100
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
 const EXTENSION_RE = /\.(js|mjs|cjs|ts|mts|cts)$/
-// The full es-module-lexer build handles erasable TypeScript syntax in the same
-// pass as JavaScript, so the `-typescript` formats use the normal export path.
+// TypeScript formats use the normal wrapping path. getModuleExports strips
+// erasable TypeScript syntax before discovering their runtime exports.
 const HANDLED_FORMATS = new Set([
   'builtin', 'module', 'commonjs', 'module-typescript', 'commonjs-typescript'
 ])

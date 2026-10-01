@@ -31,7 +31,10 @@ ok(esmExports, 'expected iitm to instrument the type-stripped .mts module')
 
 // Every value export is captured (including `beta`, the second binding of a
 // type-annotated multi-declarator), while type-only exports are excluded.
-deepStrictEqual(esmExports.slice().sort(), ['Delta', 'alpha', 'beta', 'gamma'])
+deepStrictEqual(
+  esmExports.slice().sort(),
+  ['Delta', 'alpha', 'beta', 'castAlpha', 'castBeta', 'gamma']
+)
 
 // The CommonJS sibling format ('commonjs-typescript') is wrapped the same way.
 const cjs = await import('../fixtures/typescript-cjs-hook.cts')
