@@ -505,13 +505,18 @@ export function createHook (meta, listenForHookCapabilities) {
    * @param {string} url
    * @param {string} specifier
    * @param {string | undefined} resultPath
-   * @param {string | undefined} turbopackSpecifier
    * @returns {boolean}
    */
-  function matchesAnyHookCapability (url, specifier, resultPath, turbopackSpecifier) {
-    if (registeredHookCapabilities === undefined) return false
+  function matchesAnyHookCapability (url, specifier, resultPath) {
+    if (registeredHookCapabilities === undefined || registeredHookCapabilities.length === 0) return false
     for (const capability of registeredHookCapabilities) {
-      if (matchesHookCapability(capability.modules, url, specifier, resultPath, turbopackSpecifier)) return true
+      if (matchesHookCapability(capability.modules, url, specifier, resultPath, undefined)) return true
+    }
+    const turbopackSpecifier = getTurbopackSpecifier(specifier, url)
+    if (turbopackSpecifier !== undefined) {
+      for (const capability of registeredHookCapabilities) {
+        if (capability.modules.includes(turbopackSpecifier)) return true
+      }
     }
     return false
   }
@@ -520,12 +525,12 @@ export function createHook (meta, listenForHookCapabilities) {
    * @param {string} url
    * @param {string} specifier
    * @param {string | undefined} resultPath
-   * @param {string | undefined} turbopackSpecifier
    * @returns {ReadonlySet<string> | undefined}
    */
-  function getReplaceExports (url, specifier, resultPath, turbopackSpecifier) {
+  function getReplaceExports (url, specifier, resultPath) {
     if (!hasExplicitHookCapabilities) return
 
+    const turbopackSpecifier = getTurbopackSpecifier(specifier, url)
     let replaceExports
     for (const capability of registeredHookCapabilities) {
       if (!matchesHookCapability(capability.modules, url, specifier, resultPath, turbopackSpecifier)) continue
@@ -558,9 +563,8 @@ export function createHook (meta, listenForHookCapabilities) {
    * @param {string} url
    * @param {string} specifier
    * @param {string | undefined} resultPath
-   * @param {string | undefined} turbopackSpecifier
    */
-  function defaultShouldInclude (url, specifier, resultPath, turbopackSpecifier) {
+  function defaultShouldInclude (url, specifier, resultPath) {
     function match (each) {
       if (each instanceof RegExp) {
         return each.test(url)
@@ -570,7 +574,7 @@ export function createHook (meta, listenForHookCapabilities) {
     }
 
     if (includeModules && !includeModules.some(match) &&
-      (!includeHookCapabilities || !matchesAnyHookCapability(url, specifier, resultPath, turbopackSpecifier))) {
+      (!includeHookCapabilities || !matchesAnyHookCapability(url, specifier, resultPath))) {
       return false
     }
 
@@ -665,14 +669,12 @@ export function createHook (meta, listenForHookCapabilities) {
       return result
     }
 
-    const turbopackSpecifier = registeredHookCapabilities === undefined
-      ? undefined
-      : getTurbopackSpecifier(specifier, result.url)
-    const resultPath = shouldInclude === defaultShouldInclude || hasExplicitHookCapabilities
+    const resultPath = hasExplicitHookCapabilities ||
+      (shouldInclude === defaultShouldInclude && (includeModules || excludeModules))
       ? getFilePath(result.url)
       : undefined
     const included = shouldInclude === defaultShouldInclude
-      ? defaultShouldInclude(result.url, specifier, resultPath, turbopackSpecifier)
+      ? defaultShouldInclude(result.url, specifier, resultPath)
       : shouldInclude(result.url, specifier)
     if (!included) {
       return result
@@ -714,7 +716,7 @@ export function createHook (meta, listenForHookCapabilities) {
     }
 
     // Preserve the format before an outer loader can normalize it.
-    const replaceExports = getReplaceExports(result.url, specifier, resultPath, turbopackSpecifier)
+    const replaceExports = getReplaceExports(result.url, specifier, resultPath)
     let specifierData = specifier
     if (result.format === 'module-typescript' || result.format === 'commonjs-typescript') {
       specifierData = { specifier, format: result.format, replaceExports }
