@@ -7,525 +7,256 @@ import { createHook } from '../../create-hook.mjs'
 
 const meta = { url: new URL('../../hook.mjs', import.meta.url).href }
 const conditions = ['import']
-const loadedConsumers = new WeakSet()
 const missingError = Object.assign(new Error('missing module'), { code: 'ERR_MODULE_NOT_FOUND' })
 
 /**
- * @param {string} prefix A unique file URL prefix for one hook mode.
+ * @param {string} prefix
+ * @param {boolean} [sync]
  */
-function createVirtualLoader (prefix) {
-  const rootURLs = [1, 2, 3].map(/** @param {number} index */ index => `file:///${prefix}-root-${index}.mjs`)
-  const consumerURL = `file:///${prefix}-consumer.mjs`
-  const sources = new Map([
-    ...rootURLs.map(/** @param {string} rootURL */ rootURL => [
-      rootURL,
-      `export * from './${prefix}-error.mjs'; export * from './${prefix}-registry.mjs'`
-    ]),
-    [`file:///${prefix}-error.mjs`, 'export class UserError extends Error {}'],
-    [`file:///${prefix}-registry.mjs`, `export * from './${prefix}-consumer.mjs'`],
-    [consumerURL, `
-import { UserError } from '${prefix}-alias'
-import './${prefix}-root-1.mjs'
-import './${prefix}-root-2.mjs'
-import './${prefix}-relative-alias.mjs'
-export class RegistryError extends UserError {}`]
-  ])
+function createFixture (prefix, sync = false) {
+  const roots = [1, 2, 3].map(/** @param {number} index */ index => `file:///${prefix}-root-${index}.mjs`)
+  const consumer = `file:///${prefix}-consumer.mjs`
+  const specifiers = [`${prefix}-alias`, `./${prefix}-root-1.mjs`,
+    `./${prefix}-root-2.mjs`, `./${prefix}-relative-alias.mjs`]
+  const sources = new Map()
+  for (const root of roots) {
+    sources.set(root, `export * from './${prefix}-error.mjs'; export * from './${prefix}-registry.mjs'`)
+  }
+  sources.set(`file:///${prefix}-error.mjs`, 'export class UserError extends Error {}')
+  sources.set(`file:///${prefix}-registry.mjs`, `export * from './${prefix}-consumer.mjs'`)
+  sources.set(consumer, `import { UserError } from '${specifiers[0]}'
+import '${specifiers[1]}'
+import '${specifiers[2]}'
+import '${specifiers[3]}'
+export class RegistryError extends UserError {}`)
+  const hook = createHook(meta)
+  const resolveHook = sync ? hook.resolveSync : hook.resolve
+  const loadHook = sync ? hook.loadSync : hook.load
+  let consumerLoaded = false
 
   /**
-   * @param {string} specifier The module specifier.
-   * @param {{ parentURL?: string }} context The resolve context.
+   * @param {string} specifier
+   * @param {{ parentURL?: string }} context
    */
   function nextResolve (specifier, context) {
-    if (specifier === `${prefix}-alias`) {
-      return { url: rootURLs[0], format: 'module', shortCircuit: true }
-    }
-    if (specifier === `./${prefix}-relative-alias.mjs`) {
-      return { url: rootURLs[2], format: 'module', shortCircuit: true }
-    }
-    return { url: new URL(specifier, context.parentURL).href, format: 'module', shortCircuit: true }
+    const url = specifier === specifiers[0]
+      ? roots[0]
+      : specifier === specifiers[3] ? roots[2] : new URL(specifier, context.parentURL).href
+    return { url, format: 'module', shortCircuit: true }
   }
 
-  /**
-   * @param {string} url The module URL.
-   */
+  /** @param {string} url */
   function nextLoad (url) {
     return { format: 'module', source: sources.get(url), shortCircuit: true }
   }
 
-  return { prefix, rootURLs, consumerURL, nextResolve, nextLoad }
-}
-
-/**
- * @param {ReturnType<typeof createHook>} hook The hook under test.
- * @param {ReturnType<typeof createVirtualLoader>} loader The virtual module loader.
- * @param {number} rootIndex The root module index.
- */
-async function loadAsyncRoot (hook, loader, rootIndex) {
-  if (!loadedConsumers.has(hook)) {
-    await hook.load(loader.consumerURL, { format: 'module' }, loader.nextLoad)
-    loadedConsumers.add(hook)
+  /**
+   * @param {string} specifier
+   * @param {string} [parentURL]
+   * @param {Parameters<ReturnType<typeof createHook>['resolve']>[2]} [next]
+   */
+  function resolve (specifier, parentURL = consumer, next = nextResolve) {
+    return resolveHook(specifier, { parentURL, conditions }, next)
   }
-  const wrapper = await hook.resolve(
-    loader.rootURLs[rootIndex],
-    { parentURL: `file:///${loader.prefix}-entry.mjs`, conditions },
-    loader.nextResolve
-  )
-  await hook.load(wrapper.url, { format: 'module' }, loader.nextLoad)
-}
 
-/**
- * @param {ReturnType<typeof createHook>} hook The hook under test.
- * @param {ReturnType<typeof createVirtualLoader>} loader The virtual module loader.
- */
-async function consumeAsyncCycleCandidates (hook, loader) {
-  await Promise.all([
-    hook.resolve(
-      `${loader.prefix}-alias`,
-      { parentURL: loader.consumerURL, conditions },
-      loader.nextResolve
-    ),
-    hook.resolve(
-      `./${loader.prefix}-root-1.mjs`,
-      { parentURL: loader.consumerURL, conditions },
-      loader.nextResolve
-    ),
-    hook.resolve(
-      `./${loader.prefix}-root-2.mjs`,
-      { parentURL: loader.consumerURL, conditions },
-      loader.nextResolve
-    ),
-    hook.resolve(
-      `./${loader.prefix}-relative-alias.mjs`,
-      { parentURL: loader.consumerURL, conditions },
-      loader.nextResolve
-    )
-  ])
+  /**
+   * @param {string} url
+   * @param {Parameters<ReturnType<typeof createHook>['load']>[2]} [next]
+   */
+  function load (url, next = nextLoad) {
+    return loadHook(url, { format: 'module' }, next)
+  }
+
+  /** @param {number} index */
+  async function loadRoot (index) {
+    if (!consumerLoaded) {
+      await load(consumer)
+      consumerLoaded = true
+    }
+    const wrapper = await resolve(roots[index], `file:///${prefix}-entry.mjs`)
+    await load(wrapper.url)
+  }
+
+  async function consumeCandidates () {
+    await Promise.all(specifiers.map(/** @param {string} specifier */ specifier => resolve(specifier)))
+  }
+
+  return { roots, consumer, specifiers, sources, resolve, load, loadRoot, consumeCandidates, nextResolve }
 }
 
 function failResolve () {
   throw missingError
 }
 
-const dedupeLoader = createVirtualLoader('dedupe-cycle')
-const dedupeHook = createHook(meta)
-const dedupeResult = { url: dedupeLoader.rootURLs[0], format: 'module', shortCircuit: true }
-function resolveDedupeRoot () {
-  return dedupeResult
+/** @param {string} url */
+function assertWrapped (url) {
+  strictEqual(new URL(url).searchParams.get('iitm'), 'true')
 }
-const firstDedupeWrapper = dedupeHook.resolveSync(
-  'dedupe-first-alias',
-  { parentURL: 'file:///dedupe-first-parent.mjs', conditions },
-  resolveDedupeRoot
-)
-dedupeHook.resolveSync(
-  'dedupe-first-alias',
-  { parentURL: 'file:///dedupe-first-parent.mjs', conditions },
-  resolveDedupeRoot
-)
-dedupeHook.resolveSync(
-  'dedupe-second-alias',
-  { parentURL: 'file:///dedupe-second-parent.mjs', conditions },
-  resolveDedupeRoot
-)
-dedupeHook.resolveSync(
-  'dedupe-first-alias',
-  { parentURL: 'file:///dedupe-first-parent.mjs', conditions },
-  resolveDedupeRoot
-)
-dedupeHook.resolveSync(
-  'dedupe-first-alias',
-  { parentURL: 'file:///dedupe-first-parent.mjs', conditions },
-  resolveDedupeRoot
-)
-const { source: dedupeSource } = dedupeHook.loadSync(
-  firstDedupeWrapper.url,
-  { format: 'module' },
-  dedupeLoader.nextLoad
-)
-strictEqual(dedupeSource.includes('dedupe-second-alias'), false)
-strictEqual(dedupeSource.includes('dedupe-first-alias'), true)
+
+{
+  const fixture = createFixture('dedupe-cycle', true)
+  const result = { url: fixture.roots[0], format: 'module', shortCircuit: true }
+  const resolveRoot = () => result
+  let wrapper
+  for (const index of [1, 1, 2, 1, 1]) {
+    wrapper = fixture.resolve(`dedupe-${index}-alias`, `file:///dedupe-${index}-parent.mjs`, resolveRoot)
+  }
+  const { source } = fixture.load(wrapper.url)
+  strictEqual(source.includes('dedupe-2-alias'), false)
+  strictEqual(source.includes('dedupe-1-alias'), true)
+}
 
 const retentionChild = spawnSync(process.execPath, [
-  '--expose-gc',
-  '--max-old-space-size=32',
+  '--expose-gc', '--max-old-space-size=32',
   fileURLToPath(new URL('../fixtures/cached-resolution-retention.mjs', import.meta.url))
-], {
-  env: { ...process.env, NODE_OPTIONS: '', NODE_V8_COVERAGE: '' }
-})
+], { env: { ...process.env, NODE_OPTIONS: '', NODE_V8_COVERAGE: '' } })
 strictEqual(retentionChild.status, 0, retentionChild.stderr.toString())
 
-const syncLoader = createVirtualLoader('sync-cycle')
-const syncHook = createHook(meta)
-syncHook.loadSync(syncLoader.consumerURL, { format: 'module' }, syncLoader.nextLoad)
-const firstSyncWrapper = syncHook.resolveSync(
-  syncLoader.rootURLs[0],
-  { parentURL: 'file:///sync-entry.mjs', conditions },
-  syncLoader.nextResolve
-)
-syncHook.loadSync(firstSyncWrapper.url, { format: 'module' }, syncLoader.nextLoad)
-const syncDirectCycle = syncHook.resolveSync(
-  './sync-cycle-root-1.mjs',
-  { parentURL: syncLoader.consumerURL, conditions },
-  syncLoader.nextResolve
-)
-strictEqual(syncDirectCycle.url, syncLoader.rootURLs[0])
-for (const rootURL of syncLoader.rootURLs.slice(1)) {
-  const syncWrapper = syncHook.resolveSync(
-    rootURL,
-    { parentURL: 'file:///sync-entry.mjs', conditions },
-    syncLoader.nextResolve
-  )
-  syncHook.loadSync(syncWrapper.url, { format: 'module' }, syncLoader.nextLoad)
+for (const sync of [true, false]) {
+  const fixture = createFixture(`${sync ? 'sync' : 'async'}-cycle`, sync)
+  await fixture.loadRoot(0)
+  strictEqual((await fixture.resolve(fixture.specifiers[1])).url, fixture.roots[0])
+  for (const index of [1, 2]) await fixture.loadRoot(index)
+  strictEqual((await fixture.resolve(fixture.specifiers[0])).url, fixture.roots[0])
+  strictEqual((await fixture.resolve(fixture.specifiers[3])).url, fixture.roots[2])
+  const resolveMissing = () => fixture.resolve('./missing.mjs', fixture.consumer, failResolve)
+  if (sync) throws(resolveMissing, { code: 'ERR_MODULE_NOT_FOUND' })
+  else await rejects(resolveMissing, { code: 'ERR_MODULE_NOT_FOUND' })
+  assertWrapped((await fixture.resolve(fixture.specifiers[0])).url)
 }
 
-const syncCycle = syncHook.resolveSync(
-  'sync-cycle-alias',
-  { parentURL: syncLoader.consumerURL, conditions },
-  syncLoader.nextResolve
-)
-strictEqual(syncCycle.url, syncLoader.rootURLs[0])
-const syncRelativeCycle = syncHook.resolveSync(
-  './sync-cycle-relative-alias.mjs',
-  { parentURL: syncLoader.consumerURL, conditions },
-  syncLoader.nextResolve
-)
-strictEqual(syncRelativeCycle.url, syncLoader.rootURLs[2])
-
-function resolveSyncMissing () {
-  return syncHook.resolveSync(
-    './missing.mjs',
-    { parentURL: syncLoader.consumerURL, conditions },
-    failResolve
-  )
+{
+  const fixture = createFixture('non-leaf', true)
+  const [root] = fixture.roots
+  fixture.sources.set(root, `export * from '${fixture.consumer}'`)
+  fixture.sources.set(fixture.consumer, `import '${root}'; export * from './non-leaf-value.mjs'`)
+  fixture.sources.set('file:///non-leaf-value.mjs', 'export const value = 1')
+  fixture.load(fixture.consumer)
+  const wrapper = fixture.resolve(root, 'file:///non-leaf-entry.mjs')
+  fixture.load(wrapper.url)
+  strictEqual(fixture.resolve(root).url, root)
 }
 
-throws(resolveSyncMissing, { code: 'ERR_MODULE_NOT_FOUND' })
-const syncRetry = syncHook.resolveSync(
-  'sync-cycle-alias',
-  { parentURL: syncLoader.consumerURL, conditions },
-  syncLoader.nextResolve
-)
-strictEqual(new URL(syncRetry.url).searchParams.get('iitm'), 'true')
-
-const nonLeafRootURL = 'file:///non-leaf-root.mjs'
-const nonLeafBridgeURL = 'file:///non-leaf-bridge.mjs'
-const nonLeafSources = new Map([
-  [nonLeafRootURL, "export * from './non-leaf-bridge.mjs'"],
-  [nonLeafBridgeURL, "import './non-leaf-root.mjs'; export * from './non-leaf-value.mjs'"],
-  ['file:///non-leaf-value.mjs', 'export const value = 1']
-])
-
-/**
- * @param {string} specifier The module specifier.
- * @param {{ parentURL?: string }} context The resolve context.
- */
-function resolveNonLeaf (specifier, context) {
-  return { url: new URL(specifier, context.parentURL).href, format: 'module', shortCircuit: true }
-}
-
-/** @param {string} url The module URL. */
-function loadNonLeaf (url) {
-  return { format: 'module', source: nonLeafSources.get(url), shortCircuit: true }
-}
-
-const nonLeafHook = createHook(meta)
-nonLeafHook.loadSync(nonLeafBridgeURL, { format: 'module' }, loadNonLeaf)
-const nonLeafWrapper = nonLeafHook.resolveSync(
-  nonLeafRootURL,
-  { parentURL: 'file:///non-leaf-entry.mjs', conditions },
-  resolveNonLeaf
-)
-nonLeafHook.loadSync(nonLeafWrapper.url, { format: 'module' }, loadNonLeaf)
-const nonLeafCycle = nonLeafHook.resolveSync(
-  './non-leaf-root.mjs',
-  { parentURL: nonLeafBridgeURL, conditions },
-  resolveNonLeaf
-)
-strictEqual(nonLeafCycle.url, nonLeafRootURL)
-
-const duplicateTypeScriptHook = createHook(meta)
-const duplicateTypeScriptURL = 'file:///duplicate-typescript.ts'
-const duplicateTypeScriptResolve = () => ({
-  url: duplicateTypeScriptURL,
-  format: 'module-typescript',
-  shortCircuit: true
-})
-duplicateTypeScriptHook.resolveSync(
-  './duplicate-typescript.ts',
-  { parentURL: 'file:///first-typescript-parent.mjs', conditions },
-  duplicateTypeScriptResolve
-)
-const duplicateTypeScriptWrapper = duplicateTypeScriptHook.resolveSync(
-  './duplicate-typescript.ts',
-  { parentURL: 'file:///second-typescript-parent.mjs', conditions },
-  duplicateTypeScriptResolve
-)
-duplicateTypeScriptHook.loadSync(duplicateTypeScriptWrapper.url, { format: 'module-typescript' }, () => ({
-  format: 'module-typescript',
-  source: 'export const value: number = 1',
-  shortCircuit: true
-}))
-
-const asyncLoader = createVirtualLoader('async-cycle')
-const asyncHook = createHook(meta)
-await asyncHook.load(asyncLoader.consumerURL, { format: 'module' }, asyncLoader.nextLoad)
-const firstAsyncWrapper = await asyncHook.resolve(
-  asyncLoader.rootURLs[0],
-  { parentURL: 'file:///async-entry.mjs', conditions },
-  asyncLoader.nextResolve
-)
-await asyncHook.load(firstAsyncWrapper.url, { format: 'module' }, asyncLoader.nextLoad)
-const asyncDirectCycle = await asyncHook.resolve(
-  './async-cycle-root-1.mjs',
-  { parentURL: asyncLoader.consumerURL, conditions },
-  asyncLoader.nextResolve
-)
-strictEqual(asyncDirectCycle.url, asyncLoader.rootURLs[0])
-for (const rootURL of asyncLoader.rootURLs.slice(1)) {
-  const asyncWrapper = await asyncHook.resolve(
-    rootURL,
-    { parentURL: 'file:///async-entry.mjs', conditions },
-    asyncLoader.nextResolve
-  )
-  await asyncHook.load(asyncWrapper.url, { format: 'module' }, asyncLoader.nextLoad)
-}
-
-const asyncCycle = await asyncHook.resolve(
-  'async-cycle-alias',
-  { parentURL: asyncLoader.consumerURL, conditions },
-  asyncLoader.nextResolve
-)
-strictEqual(asyncCycle.url, asyncLoader.rootURLs[0])
-const asyncRelativeCycle = await asyncHook.resolve(
-  './async-cycle-relative-alias.mjs',
-  { parentURL: asyncLoader.consumerURL, conditions },
-  asyncLoader.nextResolve
-)
-strictEqual(asyncRelativeCycle.url, asyncLoader.rootURLs[2])
-
-await rejects(
-  asyncHook.resolve(
-    './missing.mjs',
-    { parentURL: asyncLoader.consumerURL, conditions },
-    failResolve
-  ),
-  { code: 'ERR_MODULE_NOT_FOUND' }
-)
-const asyncRetry = await asyncHook.resolve(
-  'async-cycle-alias',
-  { parentURL: asyncLoader.consumerURL, conditions },
-  asyncLoader.nextResolve
-)
-strictEqual(new URL(asyncRetry.url).searchParams.get('iitm'), 'true')
-
-const missingRaceLoader = createVirtualLoader('async-missing-race')
-const missingRaceHook = createHook(meta)
-await loadAsyncRoot(missingRaceHook, missingRaceLoader, 0)
-const missingRaceSignal = new EventEmitter()
-const pendingMissingResolve = missingRaceHook.resolve(
-  './missing.mjs',
-  { parentURL: missingRaceLoader.consumerURL, conditions },
-  () => once(missingRaceSignal, 'resolved')
-)
-await consumeAsyncCycleCandidates(missingRaceHook, missingRaceLoader)
-const missingRaceAssertion = rejects(pendingMissingResolve, { code: 'ERR_MODULE_NOT_FOUND' })
-missingRaceSignal.emit('error', missingError)
-await missingRaceAssertion
-
-const supersededRaceLoader = createVirtualLoader('async-superseded-race')
-const supersededRaceHook = createHook(meta)
-await loadAsyncRoot(supersededRaceHook, supersededRaceLoader, 0)
-const supersededRaceSignal = new EventEmitter()
-const pendingSupersededResolve = supersededRaceHook.resolve(
-  './missing.mjs',
-  { parentURL: supersededRaceLoader.consumerURL, conditions },
-  () => once(supersededRaceSignal, 'resolved')
-)
-await consumeAsyncCycleCandidates(supersededRaceHook, supersededRaceLoader)
-await loadAsyncRoot(supersededRaceHook, supersededRaceLoader, 1)
-const supersededRaceAssertion = rejects(pendingSupersededResolve, { code: 'ERR_MODULE_NOT_FOUND' })
-supersededRaceSignal.emit('error', missingError)
-await supersededRaceAssertion
-const supersededCycle = await supersededRaceHook.resolve(
-  'async-superseded-race-alias',
-  { parentURL: supersededRaceLoader.consumerURL, conditions },
-  () => ({ url: supersededRaceLoader.rootURLs[1], format: 'module', shortCircuit: true })
-)
-strictEqual(new URL(supersededCycle.url).searchParams.get('iitm'), 'true')
-
-const pendingInstallLoader = createVirtualLoader('async-pending-install')
-const pendingInstallHook = createHook(meta)
-await pendingInstallHook.load(pendingInstallLoader.consumerURL, { format: 'module' }, pendingInstallLoader.nextLoad)
-loadedConsumers.add(pendingInstallHook)
-const pendingInstallSignal = new EventEmitter()
-async function waitForPendingInstall () {
-  const [result] = await once(pendingInstallSignal, 'resolved')
-  return result
-}
-const pendingInstallResolve = pendingInstallHook.resolve(
-  'async-pending-install-alias',
-  { parentURL: pendingInstallLoader.consumerURL, conditions },
-  waitForPendingInstall
-)
-await loadAsyncRoot(pendingInstallHook, pendingInstallLoader, 0)
-pendingInstallSignal.emit('resolved', {
-  url: pendingInstallLoader.rootURLs[0],
-  format: 'module',
-  shortCircuit: true
-})
-const pendingInstallCycle = await pendingInstallResolve
-strictEqual(pendingInstallCycle.url, pendingInstallLoader.rootURLs[0])
-
-const concurrentLoadExistingRootURL = 'file:///async-concurrent-load-existing-root.mjs'
-const concurrentLoadRootURL = 'file:///async-concurrent-load-root.mjs'
-const concurrentLoadLeafURL = 'file:///async-concurrent-load-leaf.mjs'
-const concurrentLoadExistingBackEdge = './async-concurrent-load-existing-root.mjs'
-const concurrentLoadBackEdge = './async-concurrent-load-root.mjs'
-const concurrentLoadSources = new Map([
-  [concurrentLoadExistingRootURL, "export * from './async-concurrent-load-leaf.mjs'"],
-  [concurrentLoadRootURL, "export * from './async-concurrent-load-leaf.mjs'"],
-  [concurrentLoadLeafURL, `
-import '${concurrentLoadExistingBackEdge}'
-import '${concurrentLoadBackEdge}'
-export const value = 1
-`]
-])
-const concurrentLoadSignal = new EventEmitter()
-let pauseConcurrentLoad = false
-
-/**
- * @param {string} specifier The module specifier.
- * @param {{ parentURL?: string }} context The resolve context.
- */
-async function resolveConcurrentLoad (specifier, context) {
-  if (pauseConcurrentLoad && specifier === concurrentLoadLeafURL) {
-    pauseConcurrentLoad = false
-    concurrentLoadSignal.emit('pending')
-    await once(concurrentLoadSignal, 'continue')
+{
+  const hook = createHook(meta)
+  const url = 'file:///duplicate-typescript.ts'
+  const resolve = () => ({ url, format: 'module-typescript', shortCircuit: true })
+  let wrapper
+  for (const parentURL of ['file:///first-typescript-parent.mjs', 'file:///second-typescript-parent.mjs']) {
+    wrapper = hook.resolveSync('./duplicate-typescript.ts', { parentURL, conditions }, resolve)
   }
-  return { url: new URL(specifier, context.parentURL).href, format: 'module', shortCircuit: true }
+  hook.loadSync(wrapper.url, { format: 'module-typescript' }, () => ({
+    format: 'module-typescript', source: 'export const value: number = 1', shortCircuit: true
+  }))
 }
 
-/** @param {string} url The module URL. */
-function loadConcurrentModule (url) {
-  return { format: 'module', source: concurrentLoadSources.get(url), shortCircuit: true }
-}
-
-const concurrentLoadHook = createHook(meta)
-await concurrentLoadHook.load(concurrentLoadLeafURL, { format: 'module' }, loadConcurrentModule)
-const concurrentLoadExistingWrapper = await concurrentLoadHook.resolve(
-  concurrentLoadExistingRootURL,
-  { parentURL: 'file:///async-concurrent-load-existing-entry.mjs', conditions },
-  resolveConcurrentLoad
-)
-await concurrentLoadHook.load(
-  concurrentLoadExistingWrapper.url,
-  { format: 'module' },
-  loadConcurrentModule
-)
-const concurrentLoadConsumedCycle = await concurrentLoadHook.resolve(
-  concurrentLoadExistingBackEdge,
-  { parentURL: concurrentLoadLeafURL, conditions },
-  () => ({ url: concurrentLoadExistingRootURL, format: 'module', shortCircuit: true })
-)
-strictEqual(concurrentLoadConsumedCycle.url, concurrentLoadExistingRootURL)
-
-const concurrentLoadWrapper = await concurrentLoadHook.resolve(
-  concurrentLoadRootURL,
-  { parentURL: 'file:///async-concurrent-load-entry.mjs', conditions },
-  resolveConcurrentLoad
-)
-pauseConcurrentLoad = true
-const concurrentScanPending = once(concurrentLoadSignal, 'pending')
-const concurrentLoad = concurrentLoadHook.load(
-  concurrentLoadWrapper.url,
-  { format: 'module' },
-  loadConcurrentModule
-)
-await concurrentScanPending
-const concurrentResolve = await concurrentLoadHook.resolve(
-  concurrentLoadBackEdge,
-  { parentURL: concurrentLoadLeafURL, conditions },
-  resolveConcurrentLoad
-)
-strictEqual(new URL(concurrentResolve.url).searchParams.get('iitm'), 'true')
-concurrentLoadSignal.emit('continue')
-await concurrentLoad
-const concurrentRetry = await concurrentLoadHook.resolve(
-  concurrentLoadBackEdge,
-  { parentURL: concurrentLoadLeafURL, conditions },
-  resolveConcurrentLoad
-)
-strictEqual(new URL(concurrentRetry.url).searchParams.get('iitm'), 'true')
-const concurrentExistingRetry = await concurrentLoadHook.resolve(
-  concurrentLoadExistingBackEdge,
-  { parentURL: concurrentLoadLeafURL, conditions },
-  resolveConcurrentLoad
-)
-strictEqual(new URL(concurrentExistingRetry.url).searchParams.get('iitm'), 'true')
-
-const initiatingLoader = createVirtualLoader('initiating-only')
-const initiatingHook = createHook(meta)
-const initiatingSpecifier = './initiating-only-root-1.mjs'
-const initiatingContext = { parentURL: initiatingLoader.consumerURL, conditions }
-const initiatingWrapper = initiatingHook.resolveSync(
-  initiatingSpecifier,
-  initiatingContext,
-  initiatingLoader.nextResolve
-)
-/** @param {string} url The module URL. */
-function loadInitiatingModule (url) {
-  return url === initiatingLoader.consumerURL
-    ? { format: 'module', source: `import '${initiatingSpecifier}'; export const value = 1`, shortCircuit: true }
-    : initiatingLoader.nextLoad(url)
-}
-initiatingHook.loadSync(initiatingWrapper.url, { format: 'module' }, loadInitiatingModule)
-const initiatingRetry = initiatingHook.resolveSync(
-  initiatingSpecifier,
-  initiatingContext,
-  initiatingLoader.nextResolve
-)
-strictEqual(new URL(initiatingRetry.url).searchParams.get('iitm'), 'true')
-
-const duplicateRaceLoader = createVirtualLoader('duplicate-load-race')
-const duplicateRaceHook = createHook(meta)
-const duplicateRaceContext = { parentURL: duplicateRaceLoader.consumerURL, conditions }
-const duplicateRaceSignal = new EventEmitter()
-const duplicateRaceSpecifiers = [
-  'duplicate-load-race-alias',
-  './duplicate-load-race-root-1.mjs',
-  './duplicate-load-race-relative-alias.mjs'
-]
-let pauseDuplicateLoad = false
-/**
- * @param {string} specifier The module specifier.
- * @param {{ parentURL?: string }} context The resolve context.
- */
-async function resolveDuplicateRace (specifier, context) {
-  if (pauseDuplicateLoad && specifier === 'file:///duplicate-load-race-registry.mjs') {
-    pauseDuplicateLoad = false
-    duplicateRaceSignal.emit('pending')
-    await once(duplicateRaceSignal, 'continue')
+for (const superseded of [false, true]) {
+  const fixture = createFixture(`async-${superseded ? 'superseded' : 'missing'}-race`)
+  await fixture.loadRoot(0)
+  const signal = new EventEmitter()
+  const pending = fixture.resolve('./missing.mjs', fixture.consumer, () => once(signal, 'resolved'))
+  await fixture.consumeCandidates()
+  if (superseded) await fixture.loadRoot(1)
+  const assertion = rejects(pending, { code: 'ERR_MODULE_NOT_FOUND' })
+  signal.emit('error', missingError)
+  await assertion
+  if (superseded) {
+    const result = await fixture.resolve(fixture.specifiers[0], fixture.consumer,
+      () => ({ url: fixture.roots[1], format: 'module', shortCircuit: true }))
+    assertWrapped(result.url)
   }
-  return duplicateRaceSpecifiers.includes(specifier)
-    ? { url: duplicateRaceLoader.rootURLs[0], format: 'module', shortCircuit: true }
-    : duplicateRaceLoader.nextResolve(specifier, context)
 }
-const [duplicateRaceWrapper] = await Promise.all(duplicateRaceSpecifiers.slice(0, 2).map(/** @param {string} specifier */ specifier =>
-  duplicateRaceHook.resolve(specifier, duplicateRaceContext, resolveDuplicateRace)
-))
-pauseDuplicateLoad = true
-const duplicateLoadPending = once(duplicateRaceSignal, 'pending')
-const duplicateLoad = duplicateRaceHook.load(
-  duplicateRaceWrapper.url,
-  { format: 'module' },
-  duplicateRaceLoader.nextLoad
-)
-await duplicateLoadPending
-await duplicateRaceHook.resolve(duplicateRaceSpecifiers[2], duplicateRaceContext, resolveDuplicateRace)
-duplicateRaceSignal.emit('continue')
-await duplicateLoad
-for (const specifier of duplicateRaceSpecifiers) {
-  const retry = await duplicateRaceHook.resolve(specifier, duplicateRaceContext, resolveDuplicateRace)
-  strictEqual(new URL(retry.url).searchParams.get('iitm'), 'true')
+
+{
+  const fixture = createFixture('async-pending-install')
+  await fixture.load(fixture.consumer)
+  const signal = new EventEmitter()
+  async function waitForResolve () {
+    const [result] = await once(signal, 'resolved')
+    return result
+  }
+  const pending = fixture.resolve(fixture.specifiers[0], fixture.consumer, waitForResolve)
+  const wrapper = await fixture.resolve(fixture.roots[0], 'file:///pending-install-entry.mjs')
+  await fixture.load(wrapper.url)
+  signal.emit('resolved', { url: fixture.roots[0], format: 'module', shortCircuit: true })
+  strictEqual((await pending).url, fixture.roots[0])
+}
+
+{
+  const fixture = createFixture('async-concurrent-load')
+  const [existingRoot, root] = fixture.roots
+  const existingBackEdge = './async-concurrent-load-root-1.mjs'
+  const backEdge = './async-concurrent-load-root-2.mjs'
+  for (const url of [existingRoot, root]) fixture.sources.set(url, `export * from '${fixture.consumer}'`)
+  fixture.sources.set(fixture.consumer, `import '${existingBackEdge}'; import '${backEdge}'; export const value = 1`)
+  const signal = new EventEmitter()
+  let pause = false
+  /**
+   * @param {string} specifier
+   * @param {{ parentURL?: string }} context
+   */
+  async function nextResolve (specifier, context) {
+    if (pause && specifier === fixture.consumer) {
+      pause = false
+      signal.emit('pending')
+      await once(signal, 'continue')
+    }
+    return fixture.nextResolve(specifier, context)
+  }
+  await fixture.load(fixture.consumer)
+  const existingWrapper = await fixture.resolve(existingRoot, 'file:///existing-entry.mjs', nextResolve)
+  await fixture.load(existingWrapper.url)
+  strictEqual((await fixture.resolve(existingBackEdge)).url, existingRoot)
+  const wrapper = await fixture.resolve(root, 'file:///concurrent-entry.mjs', nextResolve)
+  pause = true
+  const scanPending = once(signal, 'pending')
+  const loading = fixture.load(wrapper.url)
+  await scanPending
+  assertWrapped((await fixture.resolve(backEdge, fixture.consumer, nextResolve)).url)
+  signal.emit('continue')
+  await loading
+  for (const specifier of [backEdge, existingBackEdge]) assertWrapped((await fixture.resolve(specifier)).url)
+}
+
+{
+  const fixture = createFixture('initiating-only', true)
+  const specifier = fixture.specifiers[1]
+  fixture.sources.set(fixture.consumer, `import '${specifier}'; export const value = 1`)
+  const wrapper = fixture.resolve(specifier)
+  fixture.load(wrapper.url)
+  assertWrapped(fixture.resolve(specifier).url)
+}
+
+{
+  const fixture = createFixture('duplicate-load-race')
+  const specifiers = [fixture.specifiers[0], fixture.specifiers[1], fixture.specifiers[3]]
+  const signal = new EventEmitter()
+  let pause = false
+  /**
+   * @param {string} specifier
+   * @param {{ parentURL?: string }} context
+   */
+  async function nextResolve (specifier, context) {
+    if (pause && specifier === 'file:///duplicate-load-race-registry.mjs') {
+      pause = false
+      signal.emit('pending')
+      await once(signal, 'continue')
+    }
+    return specifiers.includes(specifier)
+      ? { url: fixture.roots[0], format: 'module', shortCircuit: true }
+      : fixture.nextResolve(specifier, context)
+  }
+  const [wrapper] = await Promise.all(specifiers.slice(0, 2).map(/** @param {string} specifier */ specifier =>
+    fixture.resolve(specifier, fixture.consumer, nextResolve)
+  ))
+  pause = true
+  const loadPending = once(signal, 'pending')
+  const loading = fixture.load(wrapper.url)
+  await loadPending
+  await fixture.resolve(specifiers[2], fixture.consumer, nextResolve)
+  signal.emit('continue')
+  await loading
+  for (const specifier of specifiers) {
+    assertWrapped((await fixture.resolve(specifier, fixture.consumer, nextResolve)).url)
+  }
 }
