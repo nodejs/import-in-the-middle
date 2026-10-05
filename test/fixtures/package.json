@@ -33,6 +33,7 @@
         }
       },
       "#main-entry-point-string" : "./something.js",
-      "#main-entry-point-external" : "some-external-cjs-module"
+      "#main-entry-point-external" : "some-external-cjs-module",
+      "#circular-reexport-barrel": "./circular-reexport-barrel.mjs"
     }
 }
