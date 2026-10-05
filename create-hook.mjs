@@ -468,7 +468,8 @@ export function createHook (meta) {
     // are evaluated, and can make them exit without doing anything.
     if (parentURL === '') {
       if (!EXTENSION_RE.test(result.url) && !hasIitm(result.url)) {
-        return { url: result.url, format: 'commonjs' }
+        // Extensionless CLIs can be ESM; preserve the format resolved by Node or an upstream loader.
+        return { ...result, format: result.format ?? 'commonjs' }
       }
       return result
     }
