@@ -1,6 +1,6 @@
 import { spawnSync } from 'child_process'
 import { deepStrictEqual } from 'assert'
-import { mkdirSync, writeFileSync } from 'fs'
+import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -263,19 +263,30 @@ const otherCommonModulesUsedWithInstrumentation = [
 ]
 
 const modules = [...mostPopular240NpmModules, ...otherCommonModulesUsedWithInstrumentation]
-// These packages need incompatible TypeScript peers. Separate their dependency
-// trees without dropping the latest releases from the export comparisons.
-const typescriptCwd = resolve(cwd, 'node_modules', '.iitm-typescript')
-const remixCwd = resolve(cwd, 'node_modules', '.iitm-remix')
-const remixModules = ['@remix-run/node', '@remix-run/react']
-const isolatedModules = new Map([
-  ['typescript', typescriptCwd],
-  ...remixModules.map(name => [name, remixCwd])
-])
 
-function installLibs (names, directory = cwd, peerVersions = {}) {
+// Some packages need incompatible TypeScript peers, so each group gets its own
+// dependency tree. The trees are siblings so that none resolves packages from
+// another one's node_modules. Modules not listed in a group go to the first one.
+const treesDir = resolve(cwd, 'trees')
+const groups = [
+  // SvelteKit requires typescript ^6.0.0 and typescript-estree requires <6.1.0.
+  { directory: resolve(treesDir, 'main'), peers: { typescript: '~6.0.0' } },
+  // TypeScript 7 no longer exposes the compiler API used by the packages above.
+  { directory: resolve(treesDir, 'typescript'), modules: ['typescript'] },
+  {
+    directory: resolve(treesDir, 'remix'),
+    modules: ['@remix-run/node', '@remix-run/react'],
+    peers: { typescript: '^5.1.0' }
+  }
+]
+const groupDirectories = new Map(
+  groups.flatMap(({ directory, modules = [] }) => modules.map(name => [name, directory]))
+)
+groups[0].modules = modules.filter(name => !groupDirectories.has(name))
+
+function installLibs (names, directory, peerVersions = {}) {
   mkdirSync(directory, { recursive: true })
-  // Replace the generated manifest so reruns cannot retain incompatible peers.
+  // Replace the manifest and drop the lockfile so reruns cannot retain stale resolutions.
   writeFileSync(resolve(directory, 'package.json'), JSON.stringify({
     private: true,
     dependencies: {
@@ -283,6 +294,7 @@ function installLibs (names, directory = cwd, peerVersions = {}) {
       ...peerVersions
     }
   }, null, 2) + '\n')
+  rmSync(resolve(directory, 'package-lock.json'), { force: true })
   const out = spawnSync('npm', ['install'], { cwd: directory })
   if (out.status !== 0) {
     console.error(out.stderr?.toString())
@@ -290,7 +302,7 @@ function installLibs (names, directory = cwd, peerVersions = {}) {
   }
 }
 
-function getExports (name, loader, directory = cwd) {
+function getExports (name, loader, directory) {
   const args = ['--input-type=module', '--no-warnings', '-e', `import * as lib from '${name}'; console.log(JSON.stringify(Object.keys(lib)))`]
   if (loader) args.push(loader)
   const out = spawnSync(process.execPath, args, { cwd: directory })
@@ -304,7 +316,7 @@ function getExports (name, loader, directory = cwd) {
 
 const NPM_LIST_SEMVER_PARSE = /└──.*@((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)/
 
-function getVersion (name, directory = cwd) {
+function getVersion (name, directory) {
   const result = spawnSync('npm', ['list', name, '--depth', '0'], { cwd: directory })
   const stdout = result.output.toString()
   const [, version] = stdout.match(NPM_LIST_SEMVER_PARSE)
@@ -312,7 +324,7 @@ function getVersion (name, directory = cwd) {
 }
 
 function testLib (name) {
-  const directory = isolatedModules.get(name) ?? cwd
+  const directory = groupDirectories.get(name) ?? groups[0].directory
   const version = getVersion(name, directory)
   try {
     const expected = getExports(name, undefined, directory)
@@ -327,10 +339,9 @@ function testLib (name) {
 }
 
 console.log(`📦  Installing ${modules.length} libraries...`)
-// SvelteKit requires ^6.0.0, also supported by typescript-estree; Remix requires ^5.1.0.
-installLibs(modules.filter(name => !isolatedModules.has(name)), cwd, { typescript: '^6.0.0' })
-installLibs(['typescript'], typescriptCwd)
-installLibs(remixModules, remixCwd, { typescript: '^5.1.0' })
+for (const { modules, directory, peers } of groups) {
+  installLibs(modules, directory, peers)
+}
 
 let errored = false
 for (const mod of modules) {
