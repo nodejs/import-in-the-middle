@@ -536,9 +536,9 @@ export function createHook (meta, listenForHookCapabilities) {
       if (!matchesHookCapability(capability.modules, url, specifier, resultPath, turbopackSpecifier)) continue
       if (capability.replaceExports === undefined) return
 
-      if (replaceExports === undefined) {
+      if (replaceExports === undefined || replaceExports.size === 0) {
         replaceExports = capability.replaceExports
-      } else {
+      } else if (capability.replaceExports.size !== 0) {
         const merged = new Set(replaceExports)
         for (const name of capability.replaceExports) merged.add(name)
         replaceExports = merged

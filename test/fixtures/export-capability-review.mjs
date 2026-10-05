@@ -27,6 +27,10 @@ export async function reviewCapabilities (mode) {
   const liveUrl = new URL('./export-capability-live.mjs', import.meta.url)
   const namesUrl = new URL('./export-name-collision.mjs', import.meta.url)
   const commonJsUrl = new URL('./index.js', import.meta.url)
+  const mergedUrl = new URL('./export-capability-named.mjs', import.meta.url)
+  const isolatedUrl = new URL('./export-capability-isolated.mjs', import.meta.url)
+  const mergedPath = fileURLToPath(mergedUrl)
+  const isolatedPath = fileURLToPath(isolatedUrl)
   let diamondCalls = 0
   let liveCalls = 0
   let namesCalls = 0
@@ -80,7 +84,47 @@ export async function reviewCapabilities (mode) {
     badUrlCalls++
     namespace.value = 3
   })
+  // eslint-disable-next-line no-new
+  new Hook([mergedPath], { replaceExports: [] }, namespace => {
+    strictEqual(namespace.state.hooked, false)
+  })
+  // eslint-disable-next-line no-new
+  new Hook([mergedPath, isolatedPath], { replaceExports: ['first'] },
+    /**
+     * @param {object} namespace
+     * @param {string} name
+     */
+    (namespace, name) => {
+      namespace.first = 'hooked first'
+      throws(() => { namespace.untouched = 'changed' }, { name: 'TypeError' })
+      if (name === isolatedPath) {
+        throws(() => { namespace.second = 'changed' }, { name: 'TypeError' })
+        throws(() => { namespace.state = {} }, { name: 'TypeError' })
+      }
+    })
+  // eslint-disable-next-line no-new
+  new Hook([mergedPath], { replaceExports: ['second'] }, namespace => {
+    namespace.second = 'hooked second'
+  })
+  // eslint-disable-next-line no-new
+  new Hook([mergedPath], { replaceExports: ['state'] }, namespace => {
+    namespace.state = { hooked: true }
+  })
+  // eslint-disable-next-line no-new
+  new Hook([mergedPath, isolatedPath, fileURLToPath(diamondUrl)], { replaceExports: [] }, namespace => {
+    const key = 'val' in namespace ? 'val' : 'untouched'
+    throws(() => { namespace[key] = 'changed' }, { name: 'TypeError' })
+  })
   await acknowledge()
+
+  const merged = await import(mergedUrl)
+  strictEqual(merged.first, 'hooked first')
+  strictEqual(merged.second, 'hooked second')
+  strictEqual(merged.state.hooked, true)
+  const isolated = await import(isolatedUrl)
+  strictEqual(isolated.first, 'hooked first')
+  strictEqual(isolated.second, 'original second')
+  strictEqual(isolated.state.hooked, false)
 
   const virtual = await import('virtual-live-capability')
   virtual.update()
