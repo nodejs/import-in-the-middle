@@ -1,5 +1,6 @@
 import { spawnSync } from 'child_process'
 import { deepStrictEqual } from 'assert'
+import { mkdirSync, writeFileSync } from 'fs'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -262,16 +263,37 @@ const otherCommonModulesUsedWithInstrumentation = [
 ]
 
 const modules = [...mostPopular240NpmModules, ...otherCommonModulesUsedWithInstrumentation]
+// These packages need incompatible TypeScript peers. Separate their dependency
+// trees without dropping the latest releases from the export comparisons.
+const typescriptCwd = resolve(cwd, 'node_modules', '.iitm-typescript')
+const remixCwd = resolve(cwd, 'node_modules', '.iitm-remix')
+const remixModules = ['@remix-run/node', '@remix-run/react']
+const isolatedModules = new Map([
+  ['typescript', typescriptCwd],
+  ...remixModules.map(name => [name, remixCwd])
+])
 
-function installLibs (names) {
-  spawnSync('npm', ['init', '-y'], { cwd })
-  spawnSync('npm', ['install', ...names], { cwd })
+function installLibs (names, directory = cwd, peerVersions = {}) {
+  mkdirSync(directory, { recursive: true })
+  // Replace the generated manifest so reruns cannot retain incompatible peers.
+  writeFileSync(resolve(directory, 'package.json'), JSON.stringify({
+    private: true,
+    dependencies: {
+      ...Object.fromEntries(names.map(name => [name, 'latest'])),
+      ...peerVersions
+    }
+  }, null, 2) + '\n')
+  const out = spawnSync('npm', ['install'], { cwd: directory })
+  if (out.status !== 0) {
+    console.error(out.stderr?.toString())
+    throw new Error(`Installing export-check dependencies failed in ${directory}`)
+  }
 }
 
-function getExports (name, loader) {
+function getExports (name, loader, directory = cwd) {
   const args = ['--input-type=module', '--no-warnings', '-e', `import * as lib from '${name}'; console.log(JSON.stringify(Object.keys(lib)))`]
   if (loader) args.push(loader)
-  const out = spawnSync(process.execPath, args, { cwd })
+  const out = spawnSync(process.execPath, args, { cwd: directory })
   if (out.status !== 0) {
     console.error(out.stderr.toString())
     throw new Error(`Getting exports returned non-zero exit code '${name}'`)
@@ -282,18 +304,19 @@ function getExports (name, loader) {
 
 const NPM_LIST_SEMVER_PARSE = /└──.*@((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)/
 
-function getVersion (name) {
-  const result = spawnSync('npm', ['list', name, '--depth', '0'], { cwd })
+function getVersion (name, directory = cwd) {
+  const result = spawnSync('npm', ['list', name, '--depth', '0'], { cwd: directory })
   const stdout = result.output.toString()
   const [, version] = stdout.match(NPM_LIST_SEMVER_PARSE)
   return version
 }
 
 function testLib (name) {
-  const version = getVersion(name)
+  const directory = isolatedModules.get(name) ?? cwd
+  const version = getVersion(name, directory)
   try {
-    const expected = getExports(name)
-    const actual = getExports(name, `--experimental-loader=${hook}`)
+    const expected = getExports(name, undefined, directory)
+    const actual = getExports(name, `--experimental-loader=${hook}`, directory)
     deepStrictEqual(actual, expected, `Exports for ${name} are different`)
     console.log(`✅  Exports for ${name}@${version} match`)
     return false
@@ -304,7 +327,10 @@ function testLib (name) {
 }
 
 console.log(`📦  Installing ${modules.length} libraries...`)
-installLibs(modules)
+// SvelteKit requires ^6.0.0, also supported by typescript-estree; Remix requires ^5.1.0.
+installLibs(modules.filter(name => !isolatedModules.has(name)), cwd, { typescript: '^6.0.0' })
+installLibs(['typescript'], typescriptCwd)
+installLibs(remixModules, remixCwd, { typescript: '^5.1.0' })
 
 let errored = false
 for (const mod of modules) {
