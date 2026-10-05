@@ -22,13 +22,8 @@ const {
 } = require('./lib/register')
 const getTurbopackSpecifier = require('./lib/turbopack')
 
-/**
- * @typedef {object} HookCapability
- * @property {number} id
- * @property {string[] | undefined} modules
- * @property {ReadonlyArray<string> | undefined} replaceExports
- */
-/** @typedef {{ id: number, removed: true }} HookCapabilityRemoval */
+/** @typedef {import('./lib/register').HookCapability} HookCapability */
+/** @typedef {import('./lib/register').HookCapabilityRemoval} HookCapabilityRemoval */
 /** @type {WeakMap<Function, HookCapability[]>} */
 const hookCapabilities = new WeakMap()
 
@@ -72,6 +67,7 @@ function addHook (hook) {
   addHookInternal(hook, capability)
 }
 
+/** @param {(name: string, namespace: object, specifier: string) => void} hook */
 function removeHook (hook) {
   const index = importHooks.indexOf(hook)
   if (index > -1) {
@@ -102,8 +98,7 @@ let sendModulesToLoader
  * @param {HookCapability | HookCapabilityRemoval} update
  */
 function sendHookCapabilityToLoader (update) {
-  if (!sendModulesToLoader) return
-  sendModulesToLoader(update)
+  sendModulesToLoader?.(update)
 }
 
 /**
@@ -193,6 +188,11 @@ function createAddHookMessageChannel () {
   return { registerOptions, addHookMessagePort, waitForAllMessagesAcknowledged }
 }
 
+/**
+ * @param {string[] | import('./index.js').HookFn} modules
+ * @param {import('./index.js').Options | import('./index.js').HookFn} [options]
+ * @param {import('./index.js').HookFn} [hookFn]
+ */
 function Hook (modules, options, hookFn) {
   if ((this instanceof Hook) === false) return new Hook(modules, options, hookFn)
   if (typeof modules === 'function') {

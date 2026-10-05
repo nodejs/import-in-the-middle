@@ -22,8 +22,6 @@ nodeModule.registerHooks({
   }
 })
 
-register({ include: [liveUrl.href, namedUrl.href, 'c8-reviewhash', 'date-fns'] })
-
 // eslint-disable-next-line no-new
 new Hook([livePath, namedPath], { replaceExports: [] }, namespace => {
   successfulHookCalls++
@@ -33,6 +31,8 @@ new Hook([livePath, namedPath], { replaceExports: [] }, namespace => {
     namespace.state.hooked = true
   }
 })
+
+register({ include: [liveUrl.href, namedUrl.href, 'c8-reviewhash', 'date-fns'] })
 
 // eslint-disable-next-line no-new
 new Hook(['c8'], { replaceExports: [] }, namespace => {

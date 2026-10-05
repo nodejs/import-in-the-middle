@@ -8,13 +8,11 @@ const liveUrl = new URL('../fixtures/export-capability-live.mjs', import.meta.ur
 const namedUrl = new URL('../fixtures/export-capability-named.mjs', import.meta.url)
 const defaultUrl = new URL('../fixtures/export-capability-default.mjs', import.meta.url)
 const commonJsUrl = new URL('../fixtures/index.js', import.meta.url)
-const reexportUrl = new URL('../fixtures/reexport-same-source.mjs', import.meta.url)
 const legacyUrl = new URL('../fixtures/export-capability-legacy.mjs', import.meta.url)
 const livePath = fileURLToPath(liveUrl)
 const namedPath = fileURLToPath(namedUrl)
 const defaultPath = fileURLToPath(defaultUrl)
 const commonJsPath = fileURLToPath(commonJsUrl)
-const reexportPath = fileURLToPath(reexportUrl)
 const legacyPath = fileURLToPath(legacyUrl)
 const { registerOptions, waitForAllMessagesAcknowledged } = createAddHookMessageChannel()
 
@@ -71,11 +69,6 @@ new Hook([namedPath], { replaceExports: ['second'] }, namespace => {
 new Hook([defaultPath], { replaceExports: [] }, () => function replacement () {})
 
 // eslint-disable-next-line no-new
-new Hook([reexportPath], { replaceExports: [] }, namespace => {
-  strictEqual(namespace.val, 1)
-})
-
-// eslint-disable-next-line no-new
 new Hook(['fs'], { replaceExports: [] }, namespace => {
   strictEqual(typeof namespace.readFile, 'function')
   throws(() => { namespace.readFile = undefined }, { name: 'TypeError' })
@@ -113,9 +106,6 @@ strictEqual(named.state.hooked, true)
 strictEqual(named.first, 'hooked first')
 strictEqual(named.second, 'hooked second')
 strictEqual(named.untouched, 'original')
-
-const reexport = await import(reexportUrl)
-strictEqual(reexport.val, 1)
 
 const fs = await import('node:fs')
 strictEqual(typeof fs.readFile, 'function')

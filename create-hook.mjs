@@ -44,19 +44,14 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
  * }} SpecifierData
  */
 /** @typedef {{ name: string, origin: string }} StarBinding */
-/**
- * @typedef {object} HookCapability
- * @property {number | undefined} id
- * @property {string[] | undefined} modules
- * @property {ReadonlyArray<string> | undefined} replaceExports
- */
+/** @typedef {Omit<import('./lib/register.js').HookCapability, 'id'> & { id?: number }} HookCapability */
 /**
  * @typedef {object} RegisteredHookCapability
  * @property {number | undefined} id
  * @property {string[] | undefined} modules
  * @property {ReadonlySet<string> | undefined} replaceExports
  */
-/** @typedef {{ id: number, removed: true }} HookCapabilityRemoval */
+/** @typedef {import('./lib/register.js').HookCapabilityRemoval} HookCapabilityRemoval */
 /**
  * @typedef {object} ProcessResult
  * @property {string[] | Map<string, string | StarBinding>} bindings
@@ -403,10 +398,7 @@ function addIitm (url) {
 
 /**
  * @param {{ url: string }} meta
- * @param {(listener: (capability: {
- *   modules: string[] | undefined,
- *   replaceExports: ReadonlyArray<string> | undefined
- * }) => void) => void} [listenForHookCapabilities]
+ * @param {(listener: (update: HookCapability | HookCapabilityRemoval) => void) => void} [listenForHookCapabilities]
  */
 export function createHook (meta, listenForHookCapabilities) {
   /** @type {Map<string, SpecifierData>} */
@@ -477,7 +469,6 @@ export function createHook (meta, listenForHookCapabilities) {
 
   /**
    * @param {HookCapability | HookCapabilityRemoval} update
-   * @returns {string[] | undefined}
    */
   function applyHookCapabilityUpdate (update) {
     if ('removed' in update) {
