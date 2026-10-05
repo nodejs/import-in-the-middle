@@ -106,6 +106,19 @@ function deleteIitm (url) {
   return resultUrl
 }
 
+/** @param {string} url */
+function getFilePath (url) {
+  if (!url.startsWith('file:')) return
+  let resultPath
+  const stackTraceLimit = Error.stackTraceLimit
+  Error.stackTraceLimit = 0
+  try {
+    resultPath = fileURLToPath(url)
+  } catch {}
+  Error.stackTraceLimit = stackTraceLimit
+  return resultPath
+}
+
 function isBareSpecifier (specifier) {
   // Relative and absolute paths are not bare specifiers.
   if (
@@ -365,6 +378,23 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
   return { bindings, origins: starOrigins }
 }
 
+/**
+ * @param {string[] | Map<string, string | StarBinding>} bindings
+ * @param {ReadonlySet<string>} replaceExports
+ */
+function canUseNativeNamespace (bindings, replaceExports) {
+  if (bindings instanceof Map) {
+    for (const binding of bindings.values()) {
+      if (typeof binding !== 'string' || replaceExports.has(binding)) return false
+    }
+  } else {
+    for (const name of replaceExports) {
+      if (bindings.includes(name)) return false
+    }
+  }
+  return true
+}
+
 function addIitm (url) {
   const urlObj = new URL(url.startsWith('node:') ? `file:///${url}` : url)
   urlObj.searchParams.set('iitm', 'true')
@@ -401,7 +431,6 @@ export function createHook (meta, listenForHookCapabilities) {
 
   /**
    * @param {HookCapability} capability
-   * @returns {string[] | undefined}
    */
   function registerHookCapability (capability) {
     let modules
@@ -420,7 +449,6 @@ export function createHook (meta, listenForHookCapabilities) {
     if (replaceExports !== undefined) hasExplicitHookCapabilities = true
     registeredHookCapabilities ??= []
     registeredHookCapabilities.push({ id: capability.id, modules, replaceExports })
-    return modules
   }
 
   /**
@@ -456,7 +484,7 @@ export function createHook (meta, listenForHookCapabilities) {
       removeHookCapability(update.id)
       return
     }
-    return registerHookCapability(update)
+    registerHookCapability(update)
   }
 
   /**
@@ -491,24 +519,18 @@ export function createHook (meta, listenForHookCapabilities) {
   /**
    * @param {string} url
    * @param {string} specifier
+   * @param {string | undefined} resultPath
    * @param {string | undefined} turbopackSpecifier
    * @returns {ReadonlySet<string> | undefined}
    */
-  function getReplaceExports (url, specifier, turbopackSpecifier) {
+  function getReplaceExports (url, specifier, resultPath, turbopackSpecifier) {
     if (!hasExplicitHookCapabilities) return
 
-    let resultPath
-    if (url.startsWith('file:')) {
-      resultPath = fileURLToPath(url)
-    }
-
-    let matched = false
     let replaceExports
     for (const capability of registeredHookCapabilities) {
       if (!matchesHookCapability(capability.modules, url, specifier, resultPath, turbopackSpecifier)) continue
       if (capability.replaceExports === undefined) return
 
-      matched = true
       if (replaceExports === undefined) {
         replaceExports = capability.replaceExports
       } else {
@@ -517,7 +539,7 @@ export function createHook (meta, listenForHookCapabilities) {
         replaceExports = merged
       }
     }
-    return matched ? replaceExports : undefined
+    return replaceExports
   }
 
   if (listenForHookCapabilities !== undefined) {
@@ -532,16 +554,13 @@ export function createHook (meta, listenForHookCapabilities) {
   // node_modules, and the full file URL for non-bare specifier imports (relative
   // paths would be error prone). An absolute path entry added via Hook over the
   // message port matches the resolved file path, so it is resolved here.
-  function defaultShouldInclude (url, specifier, turbopackSpecifier) {
-    let resultPath
-    if (url.startsWith('file:')) {
-      const stackTraceLimit = Error.stackTraceLimit
-      Error.stackTraceLimit = 0
-      try {
-        resultPath = fileURLToPath(url)
-      } catch {}
-      Error.stackTraceLimit = stackTraceLimit
-    }
+  /**
+   * @param {string} url
+   * @param {string} specifier
+   * @param {string | undefined} resultPath
+   * @param {string | undefined} turbopackSpecifier
+   */
+  function defaultShouldInclude (url, specifier, resultPath, turbopackSpecifier) {
     function match (each) {
       if (each instanceof RegExp) {
         return each.test(url)
@@ -649,8 +668,11 @@ export function createHook (meta, listenForHookCapabilities) {
     const turbopackSpecifier = registeredHookCapabilities === undefined
       ? undefined
       : getTurbopackSpecifier(specifier, result.url)
+    const resultPath = shouldInclude === defaultShouldInclude || hasExplicitHookCapabilities
+      ? getFilePath(result.url)
+      : undefined
     const included = shouldInclude === defaultShouldInclude
-      ? defaultShouldInclude(result.url, specifier, turbopackSpecifier)
+      ? defaultShouldInclude(result.url, specifier, resultPath, turbopackSpecifier)
       : shouldInclude(result.url, specifier)
     if (!included) {
       return result
@@ -692,7 +714,7 @@ export function createHook (meta, listenForHookCapabilities) {
     }
 
     // Preserve the format before an outer loader can normalize it.
-    const replaceExports = getReplaceExports(result.url, specifier, turbopackSpecifier)
+    const replaceExports = getReplaceExports(result.url, specifier, resultPath, turbopackSpecifier)
     let specifierData = specifier
     if (result.format === 'module-typescript' || result.format === 'commonjs-typescript') {
       specifierData = { specifier, format: result.format, replaceExports }
@@ -776,7 +798,8 @@ export function createHook (meta, listenForHookCapabilities) {
   ) {
     const isEsm = format === 'module' || format === 'module-typescript'
     const isBuiltin = format === 'builtin'
-    if (isEsm && replaceExports?.size === 0 && shouldReexport('module.exports', realUrl)) {
+    if (isEsm && replaceExports !== undefined &&
+      shouldReexport('module.exports', realUrl) && canUseNativeNamespace(bindings, replaceExports)) {
       const hasDefault = bindings instanceof Map ? bindings.has('default') : bindings.includes('default')
       return `
 import { register, ModuleBinder } from ${JSON.stringify(iitmURL)}
@@ -803,21 +826,17 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
     let passthroughDeclarations = ''
     let passthroughNames = ''
     let passthroughExportGroups
-    let passthroughImportSpecifiers = ''
     let passthroughExportSpecifiers = ''
-    let passthroughReadCases = ''
     let passthroughSources
     let passthroughIndex = 0
     let writeCases = ''
     let index = 0
-    let canUseImportedBindings = isEsm && replaceExports !== undefined
     for (const binding of bindings.values()) {
       const directName = typeof binding === 'string' ? binding : undefined
       const name = directName ?? binding.name
       let namespaceName = 'namespace'
       let sourceSpecifier = realUrl
       if (directName === undefined) {
-        canUseImportedBindings = false
         originNamespaces ??= new Map()
         namespaceName = originNamespaces.get(binding.origin)
         if (namespaceName === undefined) {
@@ -831,18 +850,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       const exportName = name === 'default' ? name : objectKey
       const sourceName = isBuiltin && nonEnumerableExportNames?.has(name) ? `${namespaceName}.default` : namespaceName
       if (replaceExports !== undefined && !replaceExports.has(name)) {
-        if (name === 'module.exports') {
-          canUseImportedBindings = false
-        } else if (isEsm) {
-          const passthroughVariableName = `$p${passthroughIndex}`
-          passthroughImportSpecifiers += passthroughImportSpecifiers === ''
-            ? `${exportName} as ${passthroughVariableName}`
-            : `, ${exportName} as ${passthroughVariableName}`
-          passthroughExportSpecifiers += passthroughExportSpecifiers === ''
-            ? `${passthroughVariableName} as ${exportName}`
-            : `, ${passthroughVariableName} as ${exportName}`
-          passthroughReadCases += `    case ${passthroughIndex}: return ${passthroughVariableName}\n`
-        } else if (!isBuiltin || sourceName !== namespaceName) {
+        if (!isEsm && shouldReexport(name, realUrl) && (!isBuiltin || sourceName !== namespaceName)) {
           const passthroughVariableName = `$p${passthroughIndex}`
           passthroughDeclarations += `const ${passthroughVariableName} = ${sourceName}[${objectKey}]\n`
           passthroughExportSpecifiers += passthroughExportSpecifiers === ''
@@ -869,7 +877,6 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
         continue
       }
 
-      canUseImportedBindings = false
       const variableName = `$${index}`
       declarationNames += declarationNames === '' ? variableName : `, ${variableName}`
       bindingNames += bindingNames === '' ? objectKey : `, ${objectKey}`
@@ -894,21 +901,10 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
         passthroughReexports += `export { ${exportNames} } from ${JSON.stringify(sourceSpecifier)}\n`
       }
     }
-    const useImportedBindings = canUseImportedBindings && passthroughNames !== ''
-    const moduleImport = useImportedBindings
-      ? `import { ${passthroughImportSpecifiers} } from ${JSON.stringify(realUrl)}`
-      : `import * as namespace from ${JSON.stringify(realUrl)}`
     const binder = declarationNames === ''
       ? passthroughNames === ''
         ? 'const __binder = new ModuleBinder(namespace)\n'
-        : useImportedBindings
-          ? `function __read (index) {
-  switch (index) {
-${passthroughReadCases}  }
-}
-const __binder = new ModuleBinder(undefined, undefined, undefined, undefined, [${passthroughNames}], undefined, __read)
-`
-          : `const __binder = new ModuleBinder(namespace, undefined, undefined, undefined, [${passthroughNames}]${passthroughSourceArguments})\n`
+        : `const __binder = new ModuleBinder(namespace, undefined, undefined, undefined, [${passthroughNames}]${passthroughSourceArguments})\n`
       : `let ${declarationNames}
 function __write (index, value) {
   switch (index) {
@@ -926,15 +922,13 @@ const __binder = new ModuleBinder(namespace, [${bindingNames}], __write${binding
           ? `export { default } from ${JSON.stringify(realUrl)}\n`
           : ''}`
       : ''
-    if (useImportedBindings) {
-      passthroughReexports = `export { ${passthroughExportSpecifiers} }\n`
-    } else if (!isEsm && passthroughExportSpecifiers !== '') {
+    if (!isEsm && passthroughExportSpecifiers !== '') {
       passthroughReexports = `export { ${passthroughExportSpecifiers} }\n`
     }
 
     return `
 import { register, ModuleBinder } from ${JSON.stringify(iitmURL)}
-${moduleImport}
+import * as namespace from ${JSON.stringify(realUrl)}
 ${originImports}
 ${passthroughDeclarations}
 ${binder}

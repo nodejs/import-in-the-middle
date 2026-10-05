@@ -47,6 +47,8 @@ Hook(['package-i-want-to-instrument'], { replaceExports: [] }, (exported) => {
 })
 ```
 
+The option cannot be combined with `internals: true`.
+
 All hooks for a module contribute to the replacement set. A hook without
 `replaceExports` keeps the default behavior and makes every binding replaceable.
 The lower-level `addHook()` API also makes every binding replaceable because it
