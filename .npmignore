@@ -9,3 +9,4 @@ coverage
 release-please-config.json
 tsconfig.json
 test
+benchmark
