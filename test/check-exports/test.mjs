@@ -263,12 +263,34 @@ const otherCommonModulesUsedWithInstrumentation = [
 
 const modules = [...mostPopular240NpmModules, ...otherCommonModulesUsedWithInstrumentation]
 
-function installLibs (names) {
-  spawnSync('npm', ['init', '-y'], { cwd })
-  spawnSync('npm', ['install', ...names], { cwd })
+/** @param {string} name */
+function getPackageName (name) {
+  return name === 'typescript' ? 'typescript-latest' : name
 }
 
+/** @param {string} name */
+function getInstallSpec (name) {
+  const packageName = getPackageName(name)
+  return packageName === name ? name : `${packageName}@npm:${name}`
+}
+
+/** @param {string[]} names */
+function installLibs (names) {
+  const packages = names.map(getInstallSpec)
+  // typescript-estree requires the JavaScript compiler API, removed in TypeScript 7.
+  packages.push('typescript@<6.1.0')
+  for (const args of [['init', '-y'], ['install', ...packages]]) {
+    const result = spawnSync('npm', args, { cwd, stdio: 'inherit' })
+    deepStrictEqual(result.status, 0, `npm ${args[0]} failed`)
+  }
+}
+
+/**
+ * @param {string} name
+ * @param {string | undefined} loader
+ */
 function getExports (name, loader) {
+  name = getPackageName(name)
   const args = ['--input-type=module', '--no-warnings', '-e', `import * as lib from '${name}'; console.log(JSON.stringify(Object.keys(lib)))`]
   if (loader) args.push(loader)
   const out = spawnSync(process.execPath, args, { cwd })
@@ -282,13 +304,15 @@ function getExports (name, loader) {
 
 const NPM_LIST_SEMVER_PARSE = /└──.*@((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)/
 
+/** @param {string} name */
 function getVersion (name) {
-  const result = spawnSync('npm', ['list', name, '--depth', '0'], { cwd })
+  const result = spawnSync('npm', ['list', getPackageName(name), '--depth', '0'], { cwd })
   const stdout = result.output.toString()
   const [, version] = stdout.match(NPM_LIST_SEMVER_PARSE)
   return version
 }
 
+/** @param {string} name */
 function testLib (name) {
   const version = getVersion(name)
   try {
@@ -297,8 +321,8 @@ function testLib (name) {
     deepStrictEqual(actual, expected, `Exports for ${name} are different`)
     console.log(`✅  Exports for ${name}@${version} match`)
     return false
-  } catch (err) {
-    console.error(`❌  Error getting exports for ${name}@${version}:`, err)
+  } catch (error) {
+    console.error(`❌  Error getting exports for ${name}@${version}:`, error)
     return true
   }
 }

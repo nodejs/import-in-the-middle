@@ -31,6 +31,68 @@ Hook(['package-i-want-to-modify'], (exported, name, baseDir) => {
 console.log(foo) // 1 more than whatever that module exported
 ```
 
+### Package internals
+
+`Hook(['package-name'], callback)` normally runs for imports of the package entry
+point. Set `internals: true` to also run for imported files inside that package:
+
+```js
+Hook(['package-name'], { internals: true }, (exported, name, baseDir) => {
+  // For an internal file, name is package-name/path/to/file.js.
+  // baseDir is the absolute path of the package directory.
+})
+```
+
+Internal callback names use the platform path separator. You can also hook a
+specific package subpath or absolute file path without enabling `internals`.
+Omitting the module list runs the callback for every intercepted module.
+
+`internals` is a Hook option. It does not select which modules the loader wraps.
+The loader wraps broadly by default so hooks can run after modules have loaded.
+Its `include`, `exclude`, and `shouldInclude` options make that selection instead.
+An internal-file callback requires its file to be intercepted. Exact package-name
+filters and the hooked-module message channel do not include the package's entire
+file tree, so do not use those modes with `internals: true`.
+`replaceExports` cannot be combined with `internals: true`.
+
+### Turbopack
+
+Next.js with Turbopack can append a hash to external package import names.
+IITM recognizes these names when Turbopack is active and matches hooks against
+the original package name.
+
+### Preserving live bindings
+
+By default, each hook can replace every export. IITM must create a local binding
+for each export because the hook can assign a new value to it.
+
+Use `replaceExports` to declare the bindings that a hook can replace. IITM keeps
+every other binding linked to its source module. An empty list is for hooks that
+only mutate nested properties. For ESM modules, it also avoids the generated
+binding cells and initialization work for every export.
+
+```js
+Hook(['package-i-want-to-instrument'], { replaceExports: [] }, (exported) => {
+  exported.Client.prototype.instrumented = true
+})
+```
+
+The option cannot be combined with `internals: true`.
+
+All hooks for a module contribute to the replacement set. A hook without
+`replaceExports` keeps the default behavior and makes every binding replaceable.
+The lower-level `addHook()` API also makes every binding replaceable because it
+does not filter modules.
+
+The loader must receive the capability before it resolves the module.
+Synchronous `register-hooks.mjs` registration shares it directly. Asynchronous
+registration requires `createAddHookMessageChannel()` and
+`waitForAllMessagesAcknowledged()`.
+
+The wrapper shape cannot change after Node.js links it. A hook registered after
+the import can mutate nested properties. It cannot replace a binding that the
+earlier hooks did not declare.
+
 This requires the use of an ESM loader hook, which can be added with the following
 command-line option.
 
@@ -60,7 +122,9 @@ of modules, file URLs or regular expressions to either `exclude` or specifically
 `include` which modules are intercepted. This is useful if a module is not
 compatible with the loader hook.
 
-> **Note:** This feature is incompatible with the `{internals: true}` Hook option
+A package-name filter matches that import name, rather than every file inside
+the package. To retain internal-file callbacks, select the required file URLs
+or use a regular expression that includes them.
 
 ```js
 import * as module from 'module'
@@ -82,7 +146,10 @@ module.register('import-in-the-middle/hook.mjs', import.meta.url, {
 
 If you are `Hook`'ing all modules before they are imported, for example in a
 module loaded via the Node.js `--import` CLI argument, you can configure the
-loader to intercept only modules that were specifically hooked.
+loader to intercept only modules that were specifically hooked. This avoids
+export parsing and wrapper generation for unrelated modules. Hooks must be
+registered before import, because a module loaded without a wrapper cannot be
+hooked afterward.
 
 `instrument.mjs`
 
