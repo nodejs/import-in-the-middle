@@ -6,21 +6,30 @@ on:
     types: [completed]
 
 permissions:
+  contents: read
   actions: read
   issues: write
   pull-requests: read
 
 jobs:
   report:
+    concurrency:
+      group: benchmark-report
+      cancel-in-progress: false
+      queue: max
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - name: Download benchmark report
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download benchmark reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: benchmark-report
+          pattern: benchmark-report-node*
           path: ${{ runner.temp }}/benchmark-report
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -32,78 +41,46 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const fs = require('node:fs')
             const path = require('node:path')
-            const marker = '<!-- import-in-the-middle-benchmark -->'
-            const names = ['No loader', 'Inactive loader', 'Active hook']
-            const source = fs.readFileSync(path.join(process.env.ARTIFACT_DIRECTORY, 'report.json'), 'utf8')
-            const report = JSON.parse(source)
-            const isDuration = (value) => Number.isFinite(value) && value > 0
-
-            if (report.formatVersion !== 1 || !Number.isInteger(report.prNumber) || report.prNumber < 1 ||
-              !/^[a-f0-9]{40}$/.test(report.baseSha) || !/^[a-f0-9]{40}$/.test(report.headSha) ||
-              report.headSha !== context.payload.workflow_run.head_sha ||
-              !/^v\d+\.\d+\.\d+$/.test(report.nodeVersion) || !Array.isArray(report.results) ||
-              report.results.length !== names.length) {
-              throw new Error('Invalid benchmark report')
-            }
-
-            for (let index = 0; index < names.length; index++) {
-              const result = report.results[index]
-              if (result?.name !== names[index] || !isDuration(result.baseMs) || !isDuration(result.headMs) ||
-                !Number.isFinite(result.changePercent)) {
-                throw new Error('Invalid benchmark result')
-              }
-            }
-
-            const pull = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: report.prNumber
+            const { pathToFileURL } = require('node:url')
+            const { readReport, formatReports } = await import(
+              pathToFileURL(path.join(process.env.GITHUB_WORKSPACE, 'benchmark/report.mjs')).href)
+            const reports = [22, 24].map((major) => {
+              const report = readReport(path.join(process.env.ARTIFACT_DIRECTORY,
+                `benchmark-report-node${major}`, 'report.json'))
+              if (!report.nodeVersion.startsWith(`v${major}.`)) throw new Error('Unexpected Node version')
+              return report
             })
-
-            if (pull.data.head.sha !== report.headSha) {
-              core.info('The pull request has a newer commit.')
+            const report = reports[0]
+            if (reports.some((entry) => entry.headSha !== context.payload.workflow_run.head_sha ||
+              entry.headSha !== report.headSha || entry.baseSha !== report.baseSha ||
+              entry.mergeSha !== report.mergeSha ||
+              entry.prNumber !== report.prNumber)) throw new Error('Mismatched benchmark sources')
+            const pull = await github.rest.pulls.get({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: report.prNumber
+            })
+            if (pull.data.state !== 'open' || pull.data.head.sha !== report.headSha ||
+              pull.data.merge_commit_sha !== report.mergeSha) {
+              core.info('The pull request is closed or its revisions have changed.')
               return
             }
-
-            const rows = report.results.map((result) => {
-              const change = `${result.changePercent >= 0 ? '+' : ''}${result.changePercent.toFixed(1)}%`
-              return `| ${result.name} | ${result.baseMs.toFixed(2)} ms | ${result.headMs.toFixed(2)} ms | ${change} |`
+            const merge = await github.rest.repos.getCommit({
+              owner: context.repo.owner, repo: context.repo.repo, ref: report.mergeSha
             })
+            if (merge.data.parents[0]?.sha !== report.baseSha || merge.data.parents[1]?.sha !== report.headSha) {
+              throw new Error('Mismatched benchmark merge parents')
+            }
             const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.WORKFLOW_RUN_ID}`
-            const body = [
-              marker,
-              '## Benchmark report',
-              '',
-              `Node ${report.nodeVersion}. [Workflow run](${runUrl})`,
-              '',
-              '| Scenario | Base | Pull request | Change |',
-              '| --- | ---: | ---: | ---: |',
-              ...rows,
-              '',
-              `Base: \`${report.baseSha.slice(0, 7)}\` · Head: \`${report.headSha.slice(0, 7)}\``
-            ].join('\n')
+            const body = `${formatReports(reports)}\n\n[Workflow run](${runUrl})`
+            const marker = '<!-- import-in-the-middle-benchmark -->'
             const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: report.prNumber
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: report.prNumber
             })
             const existing = comments.find((comment) =>
               comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker))
-
+            const target = { owner: context.repo.owner, repo: context.repo.repo, body }
             if (existing === undefined) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: report.prNumber,
-                body
-              })
+              await github.rest.issues.createComment({ ...target, issue_number: report.prNumber })
             } else {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body
-              })
+              await github.rest.issues.updateComment({ ...target, comment_id: existing.id })
             }

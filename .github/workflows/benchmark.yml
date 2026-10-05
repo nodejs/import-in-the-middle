@@ -2,6 +2,7 @@ name: Benchmark
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -9,44 +10,41 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        node: [22, 24]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version: ${{ matrix.node }}
       - run: npm install --ignore-scripts
       - name: Check out the base revision
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        id: base
         run: |
+          BASE_SHA=$(git rev-parse HEAD^1)
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
           git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
           npm install --ignore-scripts --prefix "$RUNNER_TEMP/base"
-      - name: Benchmark the base revision
-        run: >
-          node benchmark/run.mjs
-          --package-directory "$RUNNER_TEMP/base"
-          --output "$RUNNER_TEMP/base.json"
-      - name: Benchmark the pull request
-        run: >
-          node benchmark/run.mjs
-          --package-directory "$GITHUB_WORKSPACE"
-          --output "$RUNNER_TEMP/head.json"
-      - name: Build the benchmark report
+          printf 'sha=%s\n' "$BASE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Measure paired revisions
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ steps.base.outputs.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
           PR_NUMBER: ${{ github.event.number }}
-        run: >
-          node benchmark/compare.mjs
-          --base "$RUNNER_TEMP/base.json"
-          --head "$RUNNER_TEMP/head.json"
-          --output "$RUNNER_TEMP/report.json"
+        run: |
+          BENCHMARK_CPU=$(awk '/^Cpus_allowed_list:/ { split($2, cpus, /[-,]/); print cpus[1] }' /proc/self/status)
+          taskset --cpu-list "$BENCHMARK_CPU" node benchmark/run.mjs \
+            --base-directory "$RUNNER_TEMP/base" \
+            --output "$RUNNER_TEMP/report.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: benchmark-report
+          name: benchmark-report-node${{ matrix.node }}
           path: ${{ runner.temp }}/report.json
           if-no-files-found: error
