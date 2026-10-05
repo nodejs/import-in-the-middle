@@ -1,6 +1,6 @@
 'use strict'
 
-import getEsmExports, { lexEsm, lexEsmWithStaticImports } from '../../lib/get-esm-exports.mjs'
+import getEsmExports, { lexEsm } from '../../lib/get-esm-exports.mjs'
 import fs from 'fs'
 import assert from 'assert'
 import path from 'path'
@@ -33,29 +33,30 @@ assert.deepEqual(lexEsm('export const direct = 1; export * from "dependency"', '
   hasModuleSyntax: true
 })
 assert.deepEqual(
-  lexEsmWithStaticImports(
+  lexEsm(
     'import value from "dependency"; export * from "star"; export { other } from "named"; export { value }',
-    'file:///parent.mjs'
+    'file:///parent.mjs',
+    true
   ),
   {
     exportNames: ['other', 'value'],
     starReexports: [{ specifier: 'star', parentURL: 'file:///parent.mjs' }],
-    staticImports: 'dependency',
+    hasModuleImports: true,
     hasModuleSyntax: true
   }
 )
-assert.deepEqual(lexEsmWithStaticImports('export * from "star"', 'file:///parent.mjs'), {
+assert.deepEqual(lexEsm('export * from "star"', 'file:///parent.mjs', true), {
   exportNames: [],
   starReexports: [{ specifier: 'star', parentURL: 'file:///parent.mjs' }],
-  staticImports: false,
+  hasModuleImports: false,
   hasModuleSyntax: true
 })
 assert.deepEqual(
-  lexEsmWithStaticImports('import type { Type } from "types"; export type { Type }', 'file:///parent.mjs'),
+  lexEsm('import type { Type } from "types"; export type { Type }', 'file:///parent.mjs', true),
   {
     exportNames: [],
     starReexports: undefined,
-    staticImports: false,
+    hasModuleImports: false,
     hasModuleSyntax: true
   }
 )
