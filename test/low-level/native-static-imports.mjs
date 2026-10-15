@@ -1,5 +1,4 @@
 import { strictEqual } from 'node:assert/strict'
-import { once } from 'node:events'
 
 import { createHook } from '../../create-hook.mjs'
 
@@ -35,20 +34,37 @@ for (const [index, encode] of variants.entries()) {
     const loadHook = mode === 'sync' ? hook.loadSync : hook.load
     const wrapper = await resolveHook(root, { parentURL: 'file:///native-entry.mjs' }, resolve)
     await loadHook(wrapper.url, { format: 'module' }, load)
-    await loadHook(leaf, { format: 'module' }, load)
-    strictEqual((await resolveHook(root, { parentURL: leaf }, resolve)).url, root)
+    const native = await loadHook(leaf, { format: 'module' }, load)
+    strictEqual(native.source.endsWith(`\nimport ${JSON.stringify(`${root}?iitm=bindings`)}\n`), true)
     strictEqual(new URL((await resolveHook(root, { parentURL: leaf }, resolve)).url).searchParams.get('iitm'), 'true')
   }
 }
 
 for (const mode of ['async', 'sync']) {
-  const hook = createHook(meta)
-  const url = `file:///malformed-native-${mode}.mjs`
-  const result = { format: 'module', source: "import 'unterminated" }
-  const warning = once(process, 'warning')
-  const loadHook = mode === 'sync' ? hook.loadSync : hook.load
-  strictEqual(await loadHook(url, { format: 'module' }, () => result), result)
-  const [error] = await warning
-  strictEqual(error.message, `'import-in-the-middle' failed to track imports for '${url}'`)
-  strictEqual(error.cause instanceof Error, true)
+  for (const missingSource of [false, true]) {
+    const prefix = `file:///shared-bindings-${mode}-${missingSource}`
+    const roots = [1, 2, 3].map(/** @param {number} index */ index => `${prefix}-root-${index}.mjs`)
+    const leaf = `${prefix}-leaf.mjs`
+    const hook = createHook(meta)
+    const resolveHook = mode === 'sync' ? hook.resolveSync : hook.resolve
+    const loadHook = mode === 'sync' ? hook.loadSync : hook.load
+    /** @param {string} url */
+    const resolve = url => ({ url, format: 'module' })
+    /** @param {string} url */
+    const load = url => ({ format: 'module', source: url === leaf ? `import '${roots[0]}'; export const value = 1` : `export * from '${leaf}'` })
+    for (const root of roots) {
+      const wrapper = await resolveHook(root, { parentURL: `${prefix}-entry.mjs` }, resolve)
+      await loadHook(wrapper.url, { format: 'module' }, load)
+    }
+    const native = missingSource ? { format: 'module', source: null } : load(leaf)
+    const result = await loadHook(leaf, { format: 'module' }, () => native)
+    if (missingSource) {
+      strictEqual(result, native)
+    } else {
+      for (const root of roots) {
+        strictEqual(result.source.includes(`\nimport ${JSON.stringify(`${root}?iitm=bindings`)}\n`), true)
+      }
+    }
+    strictEqual(await loadHook(leaf, { format: 'module' }, () => native), native)
+  }
 }

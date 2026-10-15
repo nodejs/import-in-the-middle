@@ -1,11 +1,13 @@
+import { strictEqual } from 'node:assert/strict'
 import { once } from 'node:events'
+
+import * as iitm from '../../hook.mjs'
 
 let sources, port, mode, rootURL, leafURL
 let leafLoads = 0
-let rootLoads = 0
 
 /**
- * @param {{ sources: [string, string][], port: import('node:worker_threads').MessagePort, mode: string,
+ * @param {{ sources: [string, string][], port: import('node:worker_threads').MessagePort, mode: 'race' | 'failure',
  * rootURL: string, leafURL: string }} data
  */
 export function initialize (data) {
@@ -32,12 +34,16 @@ export function resolve (specifier, context, nextResolve) {
  */
 export async function load (url, context, nextLoad) {
   if (!sources.has(url)) return nextLoad(url, context)
-  if (url === rootURL && ++rootLoads === 2) port.postMessage('root-loaded')
   if (url === leafURL) {
     leafLoads++
     if (mode === 'race' && leafLoads === 1) {
       port.postMessage('leaf-pending')
-      await once(port, 'message')
+      strictEqual((await once(port, 'message'))[0], 'scan-root')
+      // A second native import can block the thread that releases this load.
+      const wrapper = await iitm.resolve(rootURL, { parentURL: import.meta.url, conditions: ['import'] }, resolve)
+      await iitm.load(wrapper.url, { format: 'module' }, load)
+      port.postMessage('root-scanned')
+      strictEqual((await once(port, 'message'))[0], 'continue')
     } else if (mode === 'failure' && leafLoads >= 2) {
       throw Object.assign(new Error('native leaf load failed'), { code: 'EXPECTED_NATIVE_LOAD_FAILURE' })
     }
