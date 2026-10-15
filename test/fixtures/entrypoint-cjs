@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+const { strictEqual } = require('node:assert')
+
+strictEqual(require.main, module)
+console.log('cjs entrypoint ran')
