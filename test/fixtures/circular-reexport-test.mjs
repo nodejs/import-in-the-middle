@@ -14,24 +14,44 @@ export async function testCircularReexport (consumerFirst) {
   const hook = new Hook((exports, name) => {
     if (name.endsWith('circular-reexport-barrel.mjs')) {
       barrelHooked = true
+      exports.value = 2
       if (consumerFirst) exports.UserError = HookedUserError
     }
     if (name.endsWith('circular-reexport-consumer.mjs')) consumerHooked = true
   })
+  let lateHook
   try {
+    let loaded
     if (consumerFirst) {
       const { RegistryError, importCircularExports } = await import('./circular-reexport-consumer.mjs')
       const exports = await importCircularExports()
+      loaded = exports
       strictEqual(exports.UserError, HookedUserError)
       strictEqual(RegistryError.prototype instanceof HookedUserError, true)
     } else {
       const { default: exports } = await import('./circular-reexport-entry.mjs')
+      loaded = exports
       strictEqual(barrelHooked, true)
       strictEqual(consumerHooked, true)
       strictEqual(exports.RegistryError.prototype instanceof exports.UserError, true)
       strictEqual(exports.sameUserError, true)
     }
+    strictEqual(loaded.getNamespace(), loaded)
+    strictEqual(loaded.value, 2)
+    strictEqual(loaded.readValue(), 2)
+    strictEqual(loaded.readNamespaceValue(), 2)
+    /**
+     * @param {Record<string, unknown>} exports
+     * @param {string} name
+     */
+    lateHook = new Hook((exports, name) => {
+      if (name.endsWith('circular-reexport-barrel.mjs')) exports.value = 3
+    })
+    strictEqual(loaded.value, 3)
+    strictEqual(loaded.readValue(), 3)
+    strictEqual(loaded.readNamespaceValue(), 3)
   } finally {
+    lateHook?.unhook()
     hook.unhook()
   }
 }

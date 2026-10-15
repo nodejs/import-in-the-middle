@@ -33,13 +33,15 @@ export async function testNativeCycle (mode) {
     if (mode === 'race') {
       const leafPending = once(port1, 'message')
       const leafImport = import(leafURL)
-      strictEqual((await leafPending)[0], 'leaf-pending')
-      const rootLoaded = once(port1, 'message')
-      const rootImport = import(rootURL)
-      const completed = Promise.all([leafImport, rootImport])
-      strictEqual((await rootLoaded)[0], 'root-loaded')
+      strictEqual((await Promise.race([leafPending, leafImport]))[0], 'leaf-pending')
+      const rootScanned = once(port1, 'message')
+      port1.postMessage('scan-root')
+      strictEqual((await Promise.race([rootScanned, leafImport]))[0], 'root-scanned')
+      strictEqual(hooked, 0)
       port1.postMessage('continue')
-      const [leaf, root] = await completed
+      const leaf = await leafImport
+      strictEqual(hooked, 1)
+      const root = await import(rootURL)
       strictEqual(leaf.RegistryError.prototype instanceof root.UserError, true)
       strictEqual(hooked, 1)
     } else {
