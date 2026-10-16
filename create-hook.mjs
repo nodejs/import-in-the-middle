@@ -55,7 +55,7 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 
 /** @param {string} url The module URL or specifier. */
 function parseIitm (url) {
-  if (typeof url !== 'string' || url.indexOf('iitm') === -1) return
+  if (typeof url !== 'string' || url.indexOf('?') === -1 || url.indexOf('iitm') === -1) return
   try {
     const parsed = new URL(url)
     if (parsed.searchParams.has('iitm')) return parsed
@@ -67,38 +67,13 @@ function hasIitm (url) {
   return parseIitm(url) !== undefined
 }
 
-function isIitm (url, meta) {
-  return url === meta.url || url === meta.url.replace('hook.mjs', 'create-hook.mjs')
-}
-
-/**
- * @param {string} url The module URL or specifier.
- * @param {URL} [parsedURL] An already parsed wrapper URL.
- */
-function deleteIitm (url, parsedURL) {
-  // Fast path: avoid URL parsing / try-catch on bare specifiers and normal file URLs.
-  if (typeof url !== 'string' || url.indexOf('iitm') === -1) {
-    return url
-  }
-  let resultUrl
-  const stackTraceLimit = Error.stackTraceLimit
-  try {
-    Error.stackTraceLimit = 0
-    const urlObj = parsedURL ?? new URL(url)
-    if (urlObj.searchParams.has('iitm')) {
-      urlObj.searchParams.delete('iitm')
-      resultUrl = urlObj.href
-      if (resultUrl.startsWith('file:///node:')) {
-        resultUrl = resultUrl.replace('file:///', '')
-      }
-    } else {
-      resultUrl = urlObj.href
-    }
-  } catch {
-    resultUrl = url
-  }
-  Error.stackTraceLimit = stackTraceLimit
-  return resultUrl
+/** @param {URL} parsedURL The parsed wrapper URL. */
+function deleteIitm (parsedURL) {
+  parsedURL.searchParams.delete('iitm')
+  const resultUrl = parsedURL.href
+  return resultUrl.startsWith('file:///node:')
+    ? resultUrl.slice('file:///'.length)
+    : resultUrl
 }
 
 function isBareSpecifier (specifier) {
@@ -442,6 +417,7 @@ export function createHook (meta) {
   const nativeModules = new Set()
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
+  const createHookURL = meta.url.replace('hook.mjs', 'create-hook.mjs')
   let includeModules, excludeModules
   let shouldInclude = defaultShouldInclude
   let disableCjsSourceStripping = false
@@ -514,33 +490,36 @@ export function createHook (meta) {
   // node_modules, and the full file URL for non-bare specifier imports (relative
   // paths would be error prone). An absolute path entry added via Hook over the
   // message port matches the resolved file path, so it is resolved here.
+  /**
+   * @param {string} url The resolved module URL.
+   * @param {string} specifier The original import specifier.
+   */
   function defaultShouldInclude (url, specifier) {
+    if (includeModules === undefined && excludeModules === undefined) return true
+
     let resultPath
-    if (url.startsWith('file:')) {
-      const stackTraceLimit = Error.stackTraceLimit
-      Error.stackTraceLimit = 0
-      try {
-        resultPath = fileURLToPath(url)
-      } catch {}
-      Error.stackTraceLimit = stackTraceLimit
-    }
+    /** @param {string | RegExp} each The module filter. */
     function match (each) {
-      if (each instanceof RegExp) {
-        return each.test(url)
+      if (each instanceof RegExp) return each.test(url)
+      if (each === specifier || each === url) return true
+      if (!each.startsWith('/') && !(isWin && (each.startsWith('\\') || each[1] === ':'))) return false
+
+      if (resultPath === undefined) {
+        resultPath = ''
+        if (url.startsWith('file:')) {
+          const stackTraceLimit = Error.stackTraceLimit
+          Error.stackTraceLimit = 0
+          try {
+            resultPath = fileURLToPath(url)
+          } catch {}
+          Error.stackTraceLimit = stackTraceLimit
+        }
       }
-
-      return each === specifier || each === url || (resultPath && each === resultPath)
+      return each === resultPath
     }
 
-    if (includeModules && !includeModules.some(match)) {
-      return false
-    }
-
-    if (excludeModules && excludeModules.some(match)) {
-      return false
-    }
-
-    return true
+    return (includeModules === undefined || includeModules.some(match)) &&
+      (excludeModules === undefined || !excludeModules.some(match))
   }
 
   // Applies the include/exclude/message-port configuration. Shared by the
@@ -603,8 +582,9 @@ export function createHook (meta) {
    * @param {string} specifier The original module specifier.
    * @param {ResolveContext} context The resolve context.
    * @param {string} parentURL The importing module URL.
+   * @param {boolean} binding Whether the request is for a cycle binding module.
    */
-  function finishResolve (result, specifier, context, parentURL) {
+  function finishResolve (result, specifier, context, parentURL, binding) {
     // Do not wrap the entrypoint module. Many CLIs check whether they are the
     // "main" module (e.g. require.main === module). Wrapping changes how they
     // are evaluated, and can make them exit without doing anything.
@@ -634,7 +614,7 @@ export function createHook (meta) {
       return result
     }
 
-    if (parseIitm(specifier)?.searchParams.get('iitm') === 'bindings') {
+    if (binding) {
       return { ...result, url: addIitm(result.url, 'bindings'), shortCircuit: true, format: 'module' }
     }
 
@@ -644,7 +624,7 @@ export function createHook (meta) {
       return result
     }
 
-    if (isIitm(parentURL, meta) || (parentURL && hasIitm(parentURL))) {
+    if (parentURL === meta.url || parentURL === createHookURL || (parentURL && hasIitm(parentURL))) {
       return result
     }
 
@@ -712,13 +692,15 @@ export function createHook (meta) {
       }
     }
 
-    const newSpecifier = deleteIitm(specifier)
+    const parsedURL = parseIitm(specifier)
+    const binding = parsedURL?.searchParams.get('iitm') === 'bindings'
+    const newSpecifier = parsedURL === undefined ? specifier : deleteIitm(parsedURL)
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
     }
     const result = await parentResolve(newSpecifier, context)
 
-    return finishResolve(result, specifier, context, parentURL)
+    return finishResolve(result, specifier, context, parentURL, binding)
   }
 
   // Synchronous counterpart to `resolve`, for `module.registerHooks`. The
@@ -741,13 +723,15 @@ export function createHook (meta) {
       }
     }
 
-    const newSpecifier = deleteIitm(specifier)
+    const parsedURL = parseIitm(specifier)
+    const binding = parsedURL?.searchParams.get('iitm') === 'bindings'
+    const newSpecifier = parsedURL === undefined ? specifier : deleteIitm(parsedURL)
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
     }
     const result = nextResolve(newSpecifier, context)
 
-    return finishResolve(result, specifier, context, parentURL)
+    return finishResolve(result, specifier, context, parentURL, binding)
   }
 
   /**
@@ -965,7 +949,7 @@ registerStaged(${JSON.stringify(realUrl)}, namespace, ${JSON.stringify(originalS
           ? parentLoad(url, context)
           : { source, shortCircuit: true, format: 'module' }
       }
-      const realUrl = deleteIitm(url, parsedURL)
+      const realUrl = deleteIitm(parsedURL)
       const result = await getSource(url, context, parentLoad, realUrl)
       // If wrapping failed, `getSource()` may have fallen back to `parentLoad`,
       // which can legally return `source: null` (e.g. for non-JS formats).
@@ -1019,7 +1003,7 @@ registerStaged(${JSON.stringify(realUrl)}, namespace, ${JSON.stringify(originalS
           ? nextLoad(url, context)
           : { source, shortCircuit: true, format: 'module' }
       }
-      const realUrl = deleteIitm(url, parsedURL)
+      const realUrl = deleteIitm(parsedURL)
       const result = getSourceSync(url, context, nextLoad, realUrl)
       // If wrapping failed, `getSourceSync()` may have fallen back to `nextLoad`,
       // which can legally return `source: null` (e.g. for non-JS formats).
