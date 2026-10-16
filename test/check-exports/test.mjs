@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process'
+import { execFileSync, spawnSync } from 'child_process'
 import { deepStrictEqual } from 'assert'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
@@ -263,11 +263,18 @@ const otherCommonModulesUsedWithInstrumentation = [
 
 const modules = [...mostPopular240NpmModules, ...otherCommonModulesUsedWithInstrumentation]
 
+/** @param {string[]} names */
 function installLibs (names) {
-  spawnSync('npm', ['init', '-y'], { cwd })
-  spawnSync('npm', ['install', ...names], { cwd })
+  execFileSync('npm', ['init', '-y'], { cwd, stdio: 'inherit' })
+  // Match the TypeScript peer ranges of typescript-estree and SvelteKit.
+  const packages = names.map(/** @param {string} name */ name => name === 'typescript' ? 'typescript@~6.0' : name)
+  execFileSync('npm', ['install', ...packages], { cwd, stdio: 'inherit' })
 }
 
+/**
+ * @param {string} name
+ * @param {string} [loader]
+ */
 function getExports (name, loader) {
   const args = ['--input-type=module', '--no-warnings', '-e', `import * as lib from '${name}'; console.log(JSON.stringify(Object.keys(lib)))`]
   if (loader) args.push(loader)
@@ -282,6 +289,7 @@ function getExports (name, loader) {
 
 const NPM_LIST_SEMVER_PARSE = /└──.*@((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)/
 
+/** @param {string} name */
 function getVersion (name) {
   const result = spawnSync('npm', ['list', name, '--depth', '0'], { cwd })
   const stdout = result.output.toString()
