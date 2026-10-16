@@ -48,7 +48,8 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 
 /** @param {string} url The module URL or specifier. */
 function parseIitm (url) {
-  if (typeof url !== 'string' || url.indexOf('?') === -1 || url.indexOf('iitm') === -1) return
+  const queryIndex = url.indexOf('?')
+  if (queryIndex === -1 || url.indexOf('iitm', queryIndex) === -1) return
   try {
     const parsed = new URL(url)
     if (parsed.searchParams.has('iitm')) return parsed

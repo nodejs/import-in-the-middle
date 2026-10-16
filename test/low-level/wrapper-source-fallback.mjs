@@ -7,7 +7,7 @@ const hook = createHook({ url: hookURL })
 const result = { source: null, format: 'json', shortCircuit: true }
 const realURL = 'file:///wrapper-source-fallback.json'
 const wrapperURL = `${realURL}?iitm=true`
-const invalidURL = '://iitm?value'
+const invalidURL = '://invalid?iitm=true'
 
 for (const load of [hook.load, hook.loadSync]) {
   const loadedURLs = []
