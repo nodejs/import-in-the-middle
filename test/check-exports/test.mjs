@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process'
+import { execFileSync, spawnSync } from 'child_process'
 import { deepStrictEqual } from 'assert'
 import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { dirname, resolve } from 'path'
@@ -284,6 +284,11 @@ const groupDirectories = new Map(
 )
 groups[0].modules = modules.filter(name => !groupDirectories.has(name))
 
+/**
+ * @param {string[]} names
+ * @param {string} directory
+ * @param {Record<string, string>} [peerVersions]
+ */
 function installLibs (names, directory, peerVersions = {}) {
   mkdirSync(directory, { recursive: true })
   // Replace the manifest and drop the lockfile so reruns cannot retain stale resolutions.
@@ -295,13 +300,14 @@ function installLibs (names, directory, peerVersions = {}) {
     }
   }, null, 2) + '\n')
   rmSync(resolve(directory, 'package-lock.json'), { force: true })
-  const out = spawnSync('npm', ['install'], { cwd: directory })
-  if (out.status !== 0) {
-    console.error(out.stderr?.toString())
-    throw new Error(`Installing export-check dependencies failed in ${directory}`)
-  }
+  execFileSync('npm', ['install'], { cwd: directory, stdio: 'inherit' })
 }
 
+/**
+ * @param {string} name
+ * @param {string | undefined} loader
+ * @param {string} directory
+ */
 function getExports (name, loader, directory) {
   const args = ['--input-type=module', '--no-warnings', '-e', `import * as lib from '${name}'; console.log(JSON.stringify(Object.keys(lib)))`]
   if (loader) args.push(loader)
@@ -316,6 +322,10 @@ function getExports (name, loader, directory) {
 
 const NPM_LIST_SEMVER_PARSE = /└──.*@((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?)/
 
+/**
+ * @param {string} name
+ * @param {string} directory
+ */
 function getVersion (name, directory) {
   const result = spawnSync('npm', ['list', name, '--depth', '0'], { cwd: directory })
   const stdout = result.output.toString()
