@@ -6,6 +6,7 @@ import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules } from 'module'
 import { getModuleExports } from './lib/get-exports.mjs'
+import { sourceToString } from './lib/get-esm-exports.mjs'
 import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 
@@ -34,6 +35,8 @@ const HANDLED_FORMATS = new Set([
 const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 
 /** @typedef {import('node:module').LoadHookContext} LoadContext */
+/** @typedef {import('node:module').ResolveHookContext} ResolveContext */
+/** @typedef {import('node:module').ResolveFnOutput} ResolveResult */
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
 /** @typedef {string | { specifier: string, format: 'module-typescript' | 'commonjs-typescript' }} SpecifierData */
 /** @typedef {{ name: string, origin: string }} StarBinding */
@@ -41,25 +44,37 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
  * @typedef {object} ProcessResult
  * @property {string[] | Map<string, string | StarBinding>} bindings
  * @property {Map<string, string> | undefined} origins
+ * @property {Map<string, string> | undefined} [cyclicImports]
+ */
+/**
+ * @typedef {object} CycleState
+ * @property {string} rootUrl
+ * @property {Map<string, string> | undefined} imports
  */
 
-function hasIitm (url) {
-  // Fast path: avoid URL parsing on the hot path when there's clearly no iitm.
-  if (typeof url !== 'string' || url.indexOf('iitm') === -1) {
-    return false
-  }
+/** @param {string} url The module URL or specifier. */
+function parseIitm (url) {
+  if (typeof url !== 'string' || url.indexOf('iitm') === -1) return
   try {
-    return new URL(url).searchParams.has('iitm')
-  } catch {
-    return false
-  }
+    const parsed = new URL(url)
+    if (parsed.searchParams.has('iitm')) return parsed
+  } catch {}
+}
+
+/** @param {string} url The module URL or specifier. */
+function hasIitm (url) {
+  return parseIitm(url) !== undefined
 }
 
 function isIitm (url, meta) {
   return url === meta.url || url === meta.url.replace('hook.mjs', 'create-hook.mjs')
 }
 
-function deleteIitm (url) {
+/**
+ * @param {string} url The module URL or specifier.
+ * @param {URL} [parsedURL] An already parsed wrapper URL.
+ */
+function deleteIitm (url, parsedURL) {
   // Fast path: avoid URL parsing / try-catch on bare specifiers and normal file URLs.
   if (typeof url !== 'string' || url.indexOf('iitm') === -1) {
     return url
@@ -68,7 +83,7 @@ function deleteIitm (url) {
   const stackTraceLimit = Error.stackTraceLimit
   try {
     Error.stackTraceLimit = 0
-    const urlObj = new URL(url)
+    const urlObj = parsedURL ?? new URL(url)
     if (urlObj.searchParams.has('iitm')) {
       urlObj.searchParams.delete('iitm')
       resultUrl = urlObj.href
@@ -221,14 +236,29 @@ function shouldExcludeExport (name, sourceUrl) {
  * created lazily once `depth` crosses {@link STAR_CYCLE_DEPTH}. A URL is added
  * before descending into its subtree and removed once that subtree finishes, so
  * it tracks the active path rather than every URL ever visited.
+ * @param {CycleState} [params.cycleState] The wrapper root and detected cycle edges.
  * @returns {Generator<Array, ProcessResult>}
  * A generator that yields I/O operations and ultimately returns the shimmed
  * bindings for all the exports from the module and any transitive export all
  * modules. `origins` (the defining module per `*`-sourced name) is `undefined`
  * for a module with no `export *`.
  */
-function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen }) {
-  const { exportNames, starReexports } = yield * getModuleExports(srcUrl, context)
+function * processModule ({
+  srcUrl,
+  context,
+  excludeDefault = false,
+  depth = 0,
+  seen,
+  cycleState
+}) {
+  let isCycleRoot = false
+  const moduleExports = yield * getModuleExports(srcUrl, context)
+  const { exportNames, starReexports } = moduleExports
+
+  if (cycleState !== undefined && moduleExports.hasModuleImports) {
+    cycleState.imports ??= new Map()
+    cycleState.imports.set(srcUrl, cycleState.rootUrl)
+  }
 
   // Most modules have no export star. Keep that path array-backed so it pays
   // neither merge bookkeeping nor a Map lookup for each direct export.
@@ -243,6 +273,11 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
       bindings.push(name)
     }
     return { bindings, origins: undefined }
+  }
+
+  if (cycleState === undefined) {
+    cycleState = { rootUrl: srcUrl, imports: undefined }
+    isCycleRoot = true
   }
 
   const bindings = new Map()
@@ -308,7 +343,8 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
         context: { ...context, format: result.format },
         excludeDefault: true,
         depth: depth + 1,
-        seen
+        seen,
+        cycleState
       })
 
       for (const binding of sub.bindings.values()) {
@@ -341,12 +377,57 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
     }
   }
 
-  return { bindings, origins: starOrigins }
+  if (isCycleRoot && cycleState.imports !== undefined) {
+    const candidates = cycleState.imports
+    cycleState.imports = undefined
+    const seenImports = new Set()
+    for (const candidate of candidates.keys()) {
+      yield * findCyclicImports(candidate, context, cycleState, seenImports)
+    }
+  }
+
+  return isCycleRoot && cycleState.imports !== undefined
+    ? { bindings, origins: starOrigins, cyclicImports: cycleState.imports }
+    : { bindings, origins: starOrigins }
 }
 
-function addIitm (url) {
+/**
+ * @param {string} url The module whose static requests can close the cycle.
+ * @param {LoadContext} context The metadata load context.
+ * @param {CycleState} cycleState The wrapper root and its closing importers.
+ * @param {Set<string>} seen Modules already inspected for this wrapper.
+ */
+function * findCyclicImports (url, context, cycleState, seen) {
+  if (seen.has(url)) return
+  seen.add(url)
+  const { moduleImports } = yield * getModuleExports(url, context)
+  if (moduleImports === undefined) return
+
+  for (const imported of moduleImports) {
+    const importAttributes = imported.attributes === null ? {} : Object.fromEntries(imported.attributes)
+    const result = yield [RESOLVE, imported.specifier, { parentURL: url, importAttributes }]
+    if (result.url === cycleState.rootUrl) {
+      cycleState.imports ??= new Map()
+      cycleState.imports.set(url, result.url)
+    } else if (result.format === 'module' || result.format === 'module-typescript' || result.format === undefined) {
+      yield * findCyclicImports(result.url, { ...context, format: result.format, importAttributes }, cycleState, seen)
+    }
+  }
+}
+
+/**
+ * @param {string} url
+ * @param {'true' | 'bindings'} [kind]
+ */
+function addIitm (url, kind = 'true') {
+  if (url.indexOf('?') === -1) {
+    const hashIndex = url.indexOf('#')
+    return hashIndex === -1
+      ? `${url}?iitm=${kind}`
+      : `${url.slice(0, hashIndex)}?iitm=${kind}${url.slice(hashIndex)}`
+  }
   const urlObj = new URL(url)
-  urlObj.searchParams.set('iitm', 'true')
+  urlObj.searchParams.set('iitm', kind)
   return urlObj.href
 }
 
@@ -356,11 +437,65 @@ function addIitm (url) {
 export function createHook (meta) {
   /** @type {Map<string, SpecifierData>} */
   const specifiers = new Map()
+  /** @type {Set<string>} */
+  const nativeModules = new Set()
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   let includeModules, excludeModules
   let shouldInclude = defaultShouldInclude
   let disableCjsSourceStripping = false
+  /** @type {Map<string, string | Set<string>> | undefined} */
+  let cyclicImportTargets
+  /** @type {Map<string, string> | undefined} */
+  let cyclicSources
+
+  /**
+   * @param {string} url The native module URL.
+   * @param {LoadResult} result The actual native load result.
+   */
+  function prepareNativeSource (url, result) {
+    if (result.format !== 'module' && result.format !== 'module-typescript') return result
+    nativeModules.add(url)
+    const targets = cyclicImportTargets?.get(url)
+    if (targets === undefined) return result
+    cyclicImportTargets.delete(url)
+    if (cyclicImportTargets.size === 0) cyclicImportTargets = undefined
+    if (result.source == null) return result
+
+    let bindingImports = ''
+    if (typeof targets === 'string') {
+      bindingImports = `\nimport ${JSON.stringify(addIitm(targets, 'bindings'))}\n`
+    } else {
+      for (const target of targets) {
+        bindingImports += `\nimport ${JSON.stringify(addIitm(target, 'bindings'))}\n`
+      }
+    }
+    // Original dependencies must initialize before the cycle's shared bindings.
+    return { ...result, source: sourceToString(result.source) + bindingImports }
+  }
+
+  /**
+   * @param {Map<string, string>} imports Cycle candidates grouped by importing module.
+   */
+  function mergeCyclicImports (imports) {
+    for (const [parentURL, targetURL] of imports) {
+      if (nativeModules.has(parentURL)) continue
+      cyclicImportTargets ??= new Map()
+      const previous = cyclicImportTargets.get(parentURL)
+      if (previous === undefined) {
+        cyclicImportTargets.set(parentURL, targetURL)
+      } else if (typeof previous === 'string') {
+        if (previous !== targetURL) {
+          const targets = new Set()
+          targets.add(previous)
+          targets.add(targetURL)
+          cyclicImportTargets.set(parentURL, targets)
+        }
+      } else {
+        previous.add(targetURL)
+      }
+    }
+  }
 
   // Track CJS module URLs that IITM has wrapped. On Node 24+, CJS modules loaded
   // via loadCJSModule (in an ESM import chain) have their require() calls for
@@ -462,6 +597,12 @@ export function createHook (meta) {
   // once the parent loader has turned the specifier into a resolved URL. The
   // only difference between the asynchronous and synchronous hooks is whether
   // that resolution was awaited, so all the wrapping decisions live here.
+  /**
+   * @param {{ url: string, format?: string }} result The resolved module.
+   * @param {string} specifier The original module specifier.
+   * @param {ResolveContext} context The resolve context.
+   * @param {string} parentURL The importing module URL.
+   */
   function finishResolve (result, specifier, context, parentURL) {
     // Do not wrap the entrypoint module. Many CLIs check whether they are the
     // "main" module (e.g. require.main === module). Wrapping changes how they
@@ -490,6 +631,10 @@ export function createHook (meta) {
     // there and only affects the synchronous path.
     if (context.conditions?.includes('require')) {
       return result
+    }
+
+    if (parseIitm(specifier)?.searchParams.get('iitm') === 'bindings') {
+      return { ...result, url: addIitm(result.url, 'bindings'), shortCircuit: true, format: 'module' }
     }
 
     // `shouldInclude` is always set (the include/exclude list matcher by default,
@@ -534,10 +679,9 @@ export function createHook (meta) {
     }
 
     // Preserve the format before an outer loader can normalize it.
-    const specifierData = result.format === 'module-typescript' || result.format === 'commonjs-typescript'
+    specifiers.set(result.url, result.format === 'module-typescript' || result.format === 'commonjs-typescript'
       ? { specifier, format: result.format }
-      : specifier
-    specifiers.set(result.url, specifierData)
+      : specifier)
 
     return {
       url: addIitm(result.url),
@@ -549,8 +693,15 @@ export function createHook (meta) {
     }
   }
 
+  /**
+   * @param {string} specifier
+   * @param {ResolveContext} context
+   * @param {(specifier: string, context?: Partial<ResolveContext>) => ResolveResult | Promise<ResolveResult>} parentResolve
+   */
   async function resolve (specifier, context, parentResolve) {
     cachedResolve = parentResolve
+
+    const { parentURL = '' } = context
 
     // See https://github.com/nodejs/import-in-the-middle/pull/76.
     if (specifier === iitmURL) {
@@ -560,7 +711,6 @@ export function createHook (meta) {
       }
     }
 
-    const { parentURL = '' } = context
     const newSpecifier = deleteIitm(specifier)
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
@@ -574,8 +724,14 @@ export function createHook (meta) {
   // synchronous `nextResolve` returns its result directly. We stash it so the
   // synchronous `load` hook can resolve star re-exports later, mirroring how
   // `resolve` caches `parentResolve`.
+  /**
+   * @param {string} specifier
+   * @param {ResolveContext} context
+   * @param {(specifier: string, context?: Partial<ResolveContext>) => ResolveResult} nextResolve
+   */
   function resolveSync (specifier, context, nextResolve) {
     cachedResolve = nextResolve
+    const { parentURL = '' } = context
 
     if (specifier === iitmURL) {
       return {
@@ -584,7 +740,6 @@ export function createHook (meta) {
       }
     }
 
-    const { parentURL = '' } = context
     const newSpecifier = deleteIitm(specifier)
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
@@ -600,8 +755,9 @@ export function createHook (meta) {
    * @param {string} realUrl The URL of the wrapped module.
    * @param {string[] | Map<string, string | StarBinding>} bindings Its exported bindings.
    * @param {string} originalSpecifier The specifier used to import the module.
+   * @param {boolean} [staged] Defer Hook invocation until the native root finishes.
    */
-  function buildWrapperSource (realUrl, bindings, originalSpecifier) {
+  function buildWrapperSource (realUrl, bindings, originalSpecifier, staged = false) {
     // The wrapped module imports its namespace as `namespace`, which serves
     // every export but the ones a same-origin `export *` collision forced onto
     // their defining module (#171): the aggregate namespace drops those as
@@ -661,15 +817,15 @@ const __binder = new ModuleBinder(namespace, [${bindingNames}], __write${binding
     const reexports = exportSpecifiers === '' ? '' : `export { ${exportSpecifiers} }\n`
 
     return `
-import { register, ModuleBinder } from ${JSON.stringify(iitmURL)}
+import { ${staged ? 'stage' : 'register'}, ModuleBinder } from ${JSON.stringify(iitmURL)}
 import * as namespace from ${JSON.stringify(realUrl)}
 ${originImports}
 ${binder}
 ${reexports}
 
-__binder.flush()
-
-register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifier)})
+${staged
+  ? 'stage(namespace, __binder)'
+  : `__binder.flush()\n\nregister(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifier)})`}
 `
   }
 
@@ -679,15 +835,29 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
    * @param {string} realUrl The URL of the wrapped module.
    * @param {LoadContext} context Its loader context.
    * @param {string} originalSpecifier The original import specifier.
-   * @param {string[] | Map<string, string | StarBinding>} bindings Its exported bindings.
+   * @param {ProcessResult} result The processed export bindings and cycle candidates.
    */
-  function onWrapSuccess (realUrl, context, originalSpecifier, bindings) {
+  function onWrapSuccess (realUrl, context, originalSpecifier, { bindings, cyclicImports }) {
     specifiers.delete(realUrl)
     // context.format is set to 'commonjs' by getCjsExports during processModule.
     if (context.format === 'commonjs') {
       cjsInIitmChain.add(realUrl)
     }
-    return buildWrapperSource(realUrl, bindings, originalSpecifier)
+    if (cyclicImports === undefined) return buildWrapperSource(realUrl, bindings, originalSpecifier)
+
+    const bindingURL = addIitm(realUrl, 'bindings')
+    const source = buildWrapperSource(realUrl, bindings, originalSpecifier, true)
+    cyclicSources ??= new Map()
+    cyclicSources.set(bindingURL, source)
+    mergeCyclicImports(cyclicImports)
+    const hasDefault = bindings.has('default')
+    return `
+import * as namespace from ${JSON.stringify(realUrl)}
+export * from ${JSON.stringify(bindingURL)}
+${hasDefault ? `export { default } from ${JSON.stringify(bindingURL)}\n` : ''}
+import { registerStaged } from ${JSON.stringify(iitmURL)}
+registerStaged(${JSON.stringify(realUrl)}, namespace, ${JSON.stringify(originalSpecifier)})
+`
   }
 
   // Bookkeeping shared by the async and sync wrap paths when `processModule`
@@ -710,34 +880,33 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
    * @param {string} url
    * @param {LoadContext} context
    * @param {(url: string, context?: Partial<LoadContext>) => LoadResult | Promise<LoadResult>} parentGetSource
+   * @param {string} realUrl The original module URL.
    */
-  async function getSource (url, context, parentGetSource) {
-    if (hasIitm(url)) {
-      const realUrl = deleteIitm(url)
-      const specifierData = specifiers.get(realUrl)
-      if (specifierData === undefined) {
-        specifiers.delete(url)
-        return parentGetSource(url, context)
-      }
+  async function getSource (url, context, parentGetSource, realUrl) {
+    const specifierData = specifiers.get(realUrl)
+    if (specifierData === undefined) {
+      specifiers.delete(url)
+      return parentGetSource(url, context)
+    }
 
-      let originalSpecifier = specifierData
-      let processContext = context
-      if (typeof specifierData !== 'string') {
-        originalSpecifier = specifierData.specifier
-        processContext = { ...context, format: specifierData.format }
-      }
+    let originalSpecifier = specifierData
+    let processContext = context
+    if (typeof specifierData !== 'string') {
+      originalSpecifier = specifierData.specifier
+      processContext = { ...context, format: specifierData.format }
+    }
 
-      try {
-        const { bindings } = await driveAsync(
-          processModule({ srcUrl: realUrl, context: processContext }),
-          { resolve: cachedResolve, load: parentGetSource }
-        )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
-      } catch (cause) {
-        onWrapFailure(realUrl, cause)
-        // Revert back to the non-iitm URL
-        url = realUrl
-      }
+    try {
+      const result = await driveAsync(
+        processModule({ srcUrl: realUrl, context: processContext }),
+        { resolve: cachedResolve, load: parentGetSource }
+      )
+      const source = onWrapSuccess(realUrl, processContext, originalSpecifier, result)
+      return { source }
+    } catch (cause) {
+      onWrapFailure(realUrl, cause)
+      // Revert back to the non-iitm URL
+      url = realUrl
     }
 
     return parentGetSource(url, context)
@@ -750,41 +919,53 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
    * @param {string} url
    * @param {LoadContext} context
    * @param {(url: string, context?: Partial<LoadContext>) => LoadResult} nextLoad
+   * @param {string} realUrl The original module URL.
    */
-  function getSourceSync (url, context, nextLoad) {
-    if (hasIitm(url)) {
-      const realUrl = deleteIitm(url)
-      const specifierData = specifiers.get(realUrl)
-      if (specifierData === undefined) {
-        specifiers.delete(url)
-        return nextLoad(url, context)
-      }
+  function getSourceSync (url, context, nextLoad, realUrl) {
+    const specifierData = specifiers.get(realUrl)
+    if (specifierData === undefined) {
+      specifiers.delete(url)
+      return nextLoad(url, context)
+    }
 
-      let originalSpecifier = specifierData
-      let processContext = context
-      if (typeof specifierData !== 'string') {
-        originalSpecifier = specifierData.specifier
-        processContext = { ...context, format: specifierData.format }
-      }
+    let originalSpecifier = specifierData
+    let processContext = context
+    if (typeof specifierData !== 'string') {
+      originalSpecifier = specifierData.specifier
+      processContext = { ...context, format: specifierData.format }
+    }
 
-      try {
-        const { bindings } = driveSync(
-          processModule({ srcUrl: realUrl, context: processContext }),
-          { resolve: cachedResolve, load: nextLoad }
-        )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
-      } catch (cause) {
-        onWrapFailure(realUrl, cause)
-        url = realUrl
-      }
+    try {
+      const result = driveSync(
+        processModule({ srcUrl: realUrl, context: processContext }),
+        { resolve: cachedResolve, load: nextLoad }
+      )
+      const source = onWrapSuccess(realUrl, processContext, originalSpecifier, result)
+      return { source }
+    } catch (cause) {
+      onWrapFailure(realUrl, cause)
+      url = realUrl
     }
 
     return nextLoad(url, context)
   }
 
+  /**
+   * @param {string} url
+   * @param {LoadContext} context
+   * @param {(url: string, context?: Partial<LoadContext>) => LoadResult | Promise<LoadResult>} parentLoad
+   */
   async function load (url, context, parentLoad) {
-    if (hasIitm(url)) {
-      const result = await getSource(url, context, parentLoad)
+    const parsedURL = parseIitm(url)
+    if (parsedURL !== undefined) {
+      if (parsedURL.searchParams.get('iitm') === 'bindings') {
+        const source = cyclicSources?.get(url)
+        return source === undefined
+          ? parentLoad(url, context)
+          : { source, shortCircuit: true, format: 'module' }
+      }
+      const realUrl = deleteIitm(url, parsedURL)
+      const result = await getSource(url, context, parentLoad, realUrl)
       // If wrapping failed, `getSource()` may have fallen back to `parentLoad`,
       // which can legally return `source: null` (e.g. for non-JS formats).
       if (result && typeof result === 'object' && result.source != null) {
@@ -796,7 +977,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       }
 
       // Fall back to the parent loader with the original (non-iitm) URL.
-      return parentLoad(deleteIitm(url), context)
+      return parentLoad(realUrl, context)
     }
 
     // On Node 22+, when a CJS module is loaded through the ESM translator and
@@ -817,15 +998,28 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       return result
     }
 
-    return parentLoad(url, context)
+    return prepareNativeSource(url, await parentLoad(url, context))
   }
 
   // Synchronous counterpart to `load`, for `module.registerHooks`. Mirrors the
   // async `load` exactly — wrapping via `getSourceSync` and applying the same
   // CJS-in-iitm-chain source stripping — only without awaiting.
+  /**
+   * @param {string} url
+   * @param {LoadContext} context
+   * @param {(url: string, context?: Partial<LoadContext>) => LoadResult} nextLoad
+   */
   function loadSync (url, context, nextLoad) {
-    if (hasIitm(url)) {
-      const result = getSourceSync(url, context, nextLoad)
+    const parsedURL = parseIitm(url)
+    if (parsedURL !== undefined) {
+      if (parsedURL.searchParams.get('iitm') === 'bindings') {
+        const source = cyclicSources?.get(url)
+        return source === undefined
+          ? nextLoad(url, context)
+          : { source, shortCircuit: true, format: 'module' }
+      }
+      const realUrl = deleteIitm(url, parsedURL)
+      const result = getSourceSync(url, context, nextLoad, realUrl)
       // If wrapping failed, `getSourceSync()` may have fallen back to `nextLoad`,
       // which can legally return `source: null` (e.g. for non-JS formats).
       if (result && typeof result === 'object' && result.source != null) {
@@ -837,7 +1031,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       }
 
       // Fall back to the parent loader with the original (non-iitm) URL.
-      return nextLoad(deleteIitm(url), context)
+      return nextLoad(realUrl, context)
     }
 
     if (cjsInIitmChain.has(url) && !disableCjsSourceStripping) {
@@ -851,7 +1045,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       return result
     }
 
-    return nextLoad(url, context)
+    return prepareNativeSource(url, nextLoad(url, context))
   }
 
   return { initialize, load, resolve, resolveSync, loadSync, applyOptions }

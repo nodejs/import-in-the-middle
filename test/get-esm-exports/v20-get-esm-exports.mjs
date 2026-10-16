@@ -32,6 +32,41 @@ assert.deepEqual(lexEsm('export const direct = 1; export * from "dependency"', '
   starReexports: [{ specifier: 'dependency', parentURL: 'file:///parent.mjs' }],
   hasModuleSyntax: true
 })
+assert.deepEqual(
+  lexEsm(
+    'import value from "dependency"; export * from "star"; export { other } from "named"; export { value }',
+    'file:///parent.mjs',
+    true
+  ),
+  {
+    exportNames: ['other', 'value'],
+    starReexports: [{ specifier: 'star', parentURL: 'file:///parent.mjs' }],
+    hasModuleImports: true,
+    moduleImports: [
+      { specifier: 'dependency', attributes: null },
+      { specifier: 'star', attributes: null },
+      { specifier: 'named', attributes: null }
+    ],
+    hasModuleSyntax: true
+  }
+)
+assert.deepEqual(lexEsm('export * from "star"', 'file:///parent.mjs', true), {
+  exportNames: [],
+  starReexports: [{ specifier: 'star', parentURL: 'file:///parent.mjs' }],
+  hasModuleImports: false,
+  moduleImports: [{ specifier: 'star', attributes: null }],
+  hasModuleSyntax: true
+})
+assert.deepEqual(
+  lexEsm('import type { Type } from "types"; export type { Type }', 'file:///parent.mjs', true),
+  {
+    exportNames: [],
+    starReexports: undefined,
+    hasModuleImports: false,
+    moduleImports: undefined,
+    hasModuleSyntax: true
+  }
+)
 
 // // Generate fixture data
 // fixture.split('\n').forEach(line => {
