@@ -9,13 +9,15 @@
 import * as nodeModule from 'node:module'
 import { register, supportsSyncHooks } from '../../register-hooks.mjs'
 import Hook from '../../index.js'
-import { ok, strictEqual } from 'node:assert'
+import { ok, strictEqual } from 'node:assert/strict'
+import { loadSync } from '../fixtures/builtin-source-loader.mjs'
 
 if (!supportsSyncHooks()) {
   console.log(`Skipping ${process.env.IITM_TEST_FILE || import.meta.url}: synchronous hooks unsupported on this Node.js`)
   process.exit(0)
 }
 
+nodeModule.registerHooks({ load: loadSync })
 register()
 
 let eventsHookCount = 0
@@ -38,6 +40,7 @@ strictEqual(typeof events.default, 'function', 'default (EventEmitter) should be
 strictEqual(typeof events.EventEmitter, 'function', 'EventEmitter named export should be present')
 strictEqual(typeof events.once, 'function', 'once named export should be present')
 strictEqual(typeof events.on, 'function', 'on named export should be present')
+strictEqual(Object.hasOwn(events, 'fake'), false)
 ok('kMaxEventTargetListeners' in events, 'non-enumerable own property should be present')
 
 const fs = await import('node:fs')

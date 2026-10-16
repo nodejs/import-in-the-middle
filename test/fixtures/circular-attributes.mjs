@@ -18,13 +18,20 @@ export async function testCircularAttributes (mode) {
     ['{ kind: "first" }'],
     ['', '{ kind: "first" }'],
     [''],
-    ['']
+    [''],
+    [''],
+    ['{ kind: "indirect" }'],
+    [''],
+    ['{ kind: "forward" }']
   ]
   for (const [index, bags] of attributes.entries()) {
     const prefix = `file:///attribute-cycle-${mode}-${index}`
     const root = `${prefix}-root.mjs`
     const leaf = `${prefix}-leaf.mjs`
     const error = `${prefix}-error.mjs`
+    const consumer = `${prefix}-consumer.mjs`
+    const helper = `${prefix}-helper.mjs`
+    const forward = `${prefix}-forward.mjs`
     roots.push(root)
     const imports = bags.map(
       /**
@@ -43,12 +50,7 @@ export async function testCircularAttributes (mode) {
     if (index === 5) {
       imports.unshift(`export { UserError as Reexported } from '${root}' with ${bags[0]};`)
     }
-    sources.push(
-      [root, `${index >= 8 ? 'export const value = 1;' : ''}
-        ${index === 9 ? 'const extra = 5; export { extra as "x-y" }; export default 1;' : ''}
-        export { UserError } from '${error}'; export * from '${leaf}';`],
-      [error, 'export class UserError extends Error {}'],
-      [leaf, `${imports.join('\n')}
+    const body = `${imports.join('\n')}
         import * as rootNamespace from '${root}';
         export class RegistryError extends Error${bags.length - 1} {}
         ${index >= 8 ? '' : 'export const value = 1;'}
@@ -56,8 +58,27 @@ export async function testCircularAttributes (mode) {
         export function readNamespace () { return rootNamespace.value }
         export function names () { return Object.keys(rootNamespace) }
         export function getNamespace () { return rootNamespace }
-        export function read () { return import('${root}') }`]
+        export function read () { return import('${root}') }`
+    sources.push(
+      [root, `${index >= 8 ? 'export const value = 1;' : ''}
+        ${index === 9 ? 'const extra = 5; export { extra as "x-y" }; export default 1;' : ''}
+        export { UserError } from '${error}'; export * from '${leaf}';`],
+      [error, 'export class UserError extends Error {}'],
+      [leaf, index >= 10
+        ? `${index < 12 ? `import '${helper}';` : ''} export { RegistryError, readStatic, readNamespace, names, getNamespace, read } from '${consumer}';`
+        : body]
     )
+    if (index >= 10) {
+      if (index < 12) sources.push([helper, index === 10 ? '' : 'export {}'])
+      if (index % 2 === 1) {
+        sources.push(
+          [forward, `export { UserError, value } from '${root}';`],
+          [consumer, body.replaceAll(`from '${root}' /* attributes */`, `from '${forward}' /* attributes */`)]
+        )
+      } else {
+        sources.push([consumer, body])
+      }
+    }
   }
   if (mode === 'sync') {
     loader.initialize({ sources })

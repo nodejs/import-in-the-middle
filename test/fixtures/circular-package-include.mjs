@@ -30,12 +30,18 @@ export async function testCircularPackageInclude (mode) {
     await writeFile(entry, "import * as acyclic from 'acyclic-package'; import * as cycle from 'cycle-package'; export { cycle, acyclic }")
     if (mode === 'sync') {
       const { register } = await import('../../register-hooks.mjs')
-      register({ include: names })
+      register({ include: [...names, 'date-fns'] })
     } else {
-      module.register(new URL('../../hook.mjs', import.meta.url), { data: { include: names } })
+      module.register(new URL('../../hook.mjs', import.meta.url), { data: { include: [...names, 'date-fns'] } })
     }
-    /** @param {Record<string, unknown>} exports */
-    hook = new Hook(exports => { exports.value = 2 })
+    /**
+     * @param {Record<string, unknown>} exports
+     * @param {string} name
+     */
+    hook = new Hook((exports, name) => {
+      exports.value = 2
+      if (name === 'date-fns') exports.addDays = () => 'hooked'
+    })
     const { cycle, acyclic } = await import(pathToFileURL(entry).href)
     strictEqual(cycle.value, 2)
     strictEqual(cycle.read(), 2)
@@ -46,6 +52,7 @@ export async function testCircularPackageInclude (mode) {
     strictEqual(cycle.value, 3)
     strictEqual(cycle.read(), 3)
     strictEqual(acyclic.value, 3)
+    strictEqual((await import('date-fns')).addDays(), 'hooked')
   } finally {
     lateHook?.unhook()
     hook?.unhook()

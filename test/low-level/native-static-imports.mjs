@@ -19,16 +19,22 @@ for (const [index, encode] of variants.entries()) {
     const prefix = `file:///native-static-${mode}-${index}`
     const root = `${prefix}-root.mjs`
     const leaf = `${prefix}-leaf.mjs`
+    const helper = `${prefix}-helper.mjs`
     const hook = createHook(meta)
     /**
      * @param {string} url
      * @param {import('node:module').ResolveHookContext} context
      */
-    const resolve = (url, context) => ({ url: new URL(url, context.parentURL).href, format: 'module' })
+    const resolve = (url, context) => ({
+      url: new URL(url, context.parentURL).href,
+      format: url === helper ? [undefined, 'module', 'module-typescript', 'commonjs'][index] : 'module'
+    })
     /** @param {string} url */
     const load = url => ({
       format: 'module',
-      source: encode(url === root ? `export * from '${leaf}'` : `import '${root}'; export const value = 1`)
+      source: encode(url === root
+        ? `export * from '${leaf}'`
+        : url === helper ? 'export {}' : `import '${root}'; import '${helper}'; export const value = 1`)
     })
     const resolveHook = mode === 'sync' ? hook.resolveSync : hook.resolve
     const loadHook = mode === 'sync' ? hook.loadSync : hook.load
@@ -51,7 +57,7 @@ for (const mode of ['async', 'sync']) {
     /** @param {string} url */
     const resolve = url => ({ url, format: 'module' })
     /** @param {string} url */
-    const load = url => ({ format: 'module', source: url === leaf ? `import '${roots[0]}'; export const value = 1` : `export * from '${leaf}'` })
+    const load = url => ({ format: 'module', source: url === leaf ? `${roots.map(/** @param {string} root */ root => `import '${root}';`).join('\n')} export const value = 1` : `export * from '${leaf}'` })
     for (const root of roots) {
       const wrapper = await resolveHook(root, { parentURL: `${prefix}-entry.mjs` }, resolve)
       await loadHook(wrapper.url, { format: 'module' }, load)
