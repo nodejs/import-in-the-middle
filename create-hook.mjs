@@ -377,9 +377,42 @@ function * processModule ({
     }
   }
 
+  if (isCycleRoot && cycleState.imports !== undefined) {
+    const candidates = cycleState.imports
+    cycleState.imports = undefined
+    const seenImports = new Set()
+    for (const candidate of candidates.keys()) {
+      yield * findCyclicImports(candidate, context, cycleState, seenImports)
+    }
+  }
+
   return isCycleRoot && cycleState.imports !== undefined
     ? { bindings, origins: starOrigins, cyclicImports: cycleState.imports }
     : { bindings, origins: starOrigins }
+}
+
+/**
+ * @param {string} url The module whose static requests can close the cycle.
+ * @param {LoadContext} context The metadata load context.
+ * @param {CycleState} cycleState The wrapper root and its closing importers.
+ * @param {Set<string>} seen Modules already inspected for this wrapper.
+ */
+function * findCyclicImports (url, context, cycleState, seen) {
+  if (seen.has(url)) return
+  seen.add(url)
+  const { moduleImports } = yield * getModuleExports(url, context)
+  if (moduleImports === undefined) return
+
+  for (const imported of moduleImports) {
+    const importAttributes = imported.attributes === null ? {} : Object.fromEntries(imported.attributes)
+    const result = yield [RESOLVE, imported.specifier, { parentURL: url, importAttributes }]
+    if (result.url === cycleState.rootUrl) {
+      cycleState.imports ??= new Map()
+      cycleState.imports.set(url, result.url)
+    } else if (result.format === 'module' || result.format === 'module-typescript' || result.format === undefined) {
+      yield * findCyclicImports(result.url, { ...context, format: result.format, importAttributes }, cycleState, seen)
+    }
+  }
 }
 
 /**
