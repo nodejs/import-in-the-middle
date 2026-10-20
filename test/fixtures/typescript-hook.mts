@@ -11,3 +11,8 @@ export function gamma (n: number): number {
 export class Delta {
   value: number = 3
 }
+
+type GenericCast<T, U> = T
+
+export const castAlpha = 1 as GenericCast<number, unknown>
+export const castBeta = 2 as GenericCast<number, unknown>
