@@ -5,6 +5,7 @@
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules } from 'module'
+import { isAbsolute } from 'path'
 import { getModuleExports } from './lib/get-exports.mjs'
 import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
@@ -34,6 +35,8 @@ const HANDLED_FORMATS = new Set([
 const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 
 /** @typedef {import('node:module').LoadHookContext} LoadContext */
+/** @typedef {import('node:module').ResolveHookContext} ResolveContext */
+/** @typedef {import('node:module').ResolveFnOutput} ResolveResult */
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
 /** @typedef {string | { specifier: string, format: 'module-typescript' | 'commonjs-typescript' }} SpecifierData */
 /** @typedef {{ name: string, origin: string }} StarBinding */
@@ -43,46 +46,28 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
  * @property {Map<string, string> | undefined} origins
  */
 
+/** @param {string} url The module URL or specifier. */
+function parseIitm (url) {
+  const queryIndex = url.indexOf('?')
+  if (queryIndex === -1 || url.indexOf('iitm', queryIndex) === -1) return
+  try {
+    const parsed = new URL(url)
+    if (parsed.searchParams.has('iitm')) return parsed
+  } catch {}
+}
+
+/** @param {string} url The module URL or specifier. */
 function hasIitm (url) {
-  // Fast path: avoid URL parsing on the hot path when there's clearly no iitm.
-  if (typeof url !== 'string' || url.indexOf('iitm') === -1) {
-    return false
-  }
-  try {
-    return new URL(url).searchParams.has('iitm')
-  } catch {
-    return false
-  }
+  return parseIitm(url) !== undefined
 }
 
-function isIitm (url, meta) {
-  return url === meta.url || url === meta.url.replace('hook.mjs', 'create-hook.mjs')
-}
-
-function deleteIitm (url) {
-  // Fast path: avoid URL parsing / try-catch on bare specifiers and normal file URLs.
-  if (typeof url !== 'string' || url.indexOf('iitm') === -1) {
-    return url
-  }
-  let resultUrl
-  const stackTraceLimit = Error.stackTraceLimit
-  try {
-    Error.stackTraceLimit = 0
-    const urlObj = new URL(url)
-    if (urlObj.searchParams.has('iitm')) {
-      urlObj.searchParams.delete('iitm')
-      resultUrl = urlObj.href
-      if (resultUrl.startsWith('file:///node:')) {
-        resultUrl = resultUrl.replace('file:///', '')
-      }
-    } else {
-      resultUrl = urlObj.href
-    }
-  } catch {
-    resultUrl = url
-  }
-  Error.stackTraceLimit = stackTraceLimit
-  return resultUrl
+/** @param {URL} parsedURL The parsed wrapper URL. */
+function deleteIitm (parsedURL) {
+  parsedURL.searchParams.delete('iitm')
+  const resultUrl = parsedURL.href
+  return resultUrl.startsWith('file:///node:')
+    ? resultUrl.slice('file:///'.length)
+    : resultUrl
 }
 
 function isBareSpecifier (specifier) {
@@ -344,7 +329,16 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
   return { bindings, origins: starOrigins }
 }
 
+/**
+ * @param {string} url
+ */
 function addIitm (url) {
+  if (url.indexOf('?') === -1) {
+    const hashIndex = url.indexOf('#')
+    return hashIndex === -1
+      ? `${url}?iitm=true`
+      : `${url.slice(0, hashIndex)}?iitm=true${url.slice(hashIndex)}`
+  }
   const urlObj = new URL(url)
   urlObj.searchParams.set('iitm', 'true')
   return urlObj.href
@@ -358,6 +352,7 @@ export function createHook (meta) {
   const specifiers = new Map()
   let cachedResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
+  const createHookURL = meta.url.replace('hook.mjs', 'create-hook.mjs')
   let includeModules, excludeModules
   let shouldInclude = defaultShouldInclude
   let disableCjsSourceStripping = false
@@ -378,33 +373,36 @@ export function createHook (meta) {
   // node_modules, and the full file URL for non-bare specifier imports (relative
   // paths would be error prone). An absolute path entry added via Hook over the
   // message port matches the resolved file path, so it is resolved here.
+  /**
+   * @param {string} url The resolved module URL.
+   * @param {string} specifier The original import specifier.
+   */
   function defaultShouldInclude (url, specifier) {
+    if (includeModules === undefined && excludeModules === undefined) return true
+
     let resultPath
-    if (url.startsWith('file:')) {
-      const stackTraceLimit = Error.stackTraceLimit
-      Error.stackTraceLimit = 0
-      try {
-        resultPath = fileURLToPath(url)
-      } catch {}
-      Error.stackTraceLimit = stackTraceLimit
-    }
+    /** @param {string | RegExp} each The module filter. */
     function match (each) {
-      if (each instanceof RegExp) {
-        return each.test(url)
+      if (each instanceof RegExp) return each.test(url)
+      if (each === specifier || each === url) return true
+      if (!isAbsolute(each)) return false
+
+      if (resultPath === undefined) {
+        resultPath = ''
+        if (url.startsWith('file:')) {
+          const stackTraceLimit = Error.stackTraceLimit
+          Error.stackTraceLimit = 0
+          try {
+            resultPath = fileURLToPath(url)
+          } catch {}
+          Error.stackTraceLimit = stackTraceLimit
+        }
       }
-
-      return each === specifier || each === url || (resultPath && each === resultPath)
+      return each === resultPath
     }
 
-    if (includeModules && !includeModules.some(match)) {
-      return false
-    }
-
-    if (excludeModules && excludeModules.some(match)) {
-      return false
-    }
-
-    return true
+    return (includeModules === undefined || includeModules.some(match)) &&
+      (excludeModules === undefined || !excludeModules.some(match))
   }
 
   // Applies the include/exclude/message-port configuration. Shared by the
@@ -462,6 +460,12 @@ export function createHook (meta) {
   // once the parent loader has turned the specifier into a resolved URL. The
   // only difference between the asynchronous and synchronous hooks is whether
   // that resolution was awaited, so all the wrapping decisions live here.
+  /**
+   * @param {{ url: string, format?: string }} result The resolved module.
+   * @param {string} specifier The original module specifier.
+   * @param {ResolveContext} context The resolve context.
+   * @param {string} parentURL The importing module URL.
+   */
   function finishResolve (result, specifier, context, parentURL) {
     // Do not wrap the entrypoint module. Many CLIs check whether they are the
     // "main" module (e.g. require.main === module). Wrapping changes how they
@@ -499,7 +503,7 @@ export function createHook (meta) {
       return result
     }
 
-    if (isIitm(parentURL, meta) || (parentURL && hasIitm(parentURL))) {
+    if (parentURL === meta.url || parentURL === createHookURL || (parentURL && hasIitm(parentURL))) {
       return result
     }
 
@@ -535,10 +539,9 @@ export function createHook (meta) {
     }
 
     // Preserve the format before an outer loader can normalize it.
-    const specifierData = result.format === 'module-typescript' || result.format === 'commonjs-typescript'
+    specifiers.set(result.url, result.format === 'module-typescript' || result.format === 'commonjs-typescript'
       ? { specifier, format: result.format }
-      : specifier
-    specifiers.set(result.url, specifierData)
+      : specifier)
 
     return {
       url: addIitm(result.url),
@@ -550,8 +553,15 @@ export function createHook (meta) {
     }
   }
 
+  /**
+   * @param {string} specifier
+   * @param {ResolveContext} context
+   * @param {(specifier: string, context?: Partial<ResolveContext>) => ResolveResult | Promise<ResolveResult>} parentResolve
+   */
   async function resolve (specifier, context, parentResolve) {
     cachedResolve = parentResolve
+
+    const { parentURL = '' } = context
 
     // See https://github.com/nodejs/import-in-the-middle/pull/76.
     if (specifier === iitmURL) {
@@ -561,8 +571,8 @@ export function createHook (meta) {
       }
     }
 
-    const { parentURL = '' } = context
-    const newSpecifier = deleteIitm(specifier)
+    const parsedURL = parseIitm(specifier)
+    const newSpecifier = parsedURL === undefined ? specifier : deleteIitm(parsedURL)
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
     }
@@ -575,8 +585,14 @@ export function createHook (meta) {
   // synchronous `nextResolve` returns its result directly. We stash it so the
   // synchronous `load` hook can resolve star re-exports later, mirroring how
   // `resolve` caches `parentResolve`.
+  /**
+   * @param {string} specifier
+   * @param {ResolveContext} context
+   * @param {(specifier: string, context?: Partial<ResolveContext>) => ResolveResult} nextResolve
+   */
   function resolveSync (specifier, context, nextResolve) {
     cachedResolve = nextResolve
+    const { parentURL = '' } = context
 
     if (specifier === iitmURL) {
       return {
@@ -585,8 +601,8 @@ export function createHook (meta) {
       }
     }
 
-    const { parentURL = '' } = context
-    const newSpecifier = deleteIitm(specifier)
+    const parsedURL = parseIitm(specifier)
+    const newSpecifier = parsedURL === undefined ? specifier : deleteIitm(parsedURL)
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
     }
@@ -711,34 +727,32 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
    * @param {string} url
    * @param {LoadContext} context
    * @param {(url: string, context?: Partial<LoadContext>) => LoadResult | Promise<LoadResult>} parentGetSource
+   * @param {string} realUrl The original module URL.
    */
-  async function getSource (url, context, parentGetSource) {
-    if (hasIitm(url)) {
-      const realUrl = deleteIitm(url)
-      const specifierData = specifiers.get(realUrl)
-      if (specifierData === undefined) {
-        specifiers.delete(url)
-        return parentGetSource(url, context)
-      }
+  async function getSource (url, context, parentGetSource, realUrl) {
+    const specifierData = specifiers.get(realUrl)
+    if (specifierData === undefined) {
+      specifiers.delete(url)
+      return parentGetSource(url, context)
+    }
 
-      let originalSpecifier = specifierData
-      let processContext = context
-      if (typeof specifierData !== 'string') {
-        originalSpecifier = specifierData.specifier
-        processContext = { ...context, format: specifierData.format }
-      }
+    let originalSpecifier = specifierData
+    let processContext = context
+    if (typeof specifierData !== 'string') {
+      originalSpecifier = specifierData.specifier
+      processContext = { ...context, format: specifierData.format }
+    }
 
-      try {
-        const { bindings } = await driveAsync(
-          processModule({ srcUrl: realUrl, context: processContext }),
-          { resolve: cachedResolve, load: parentGetSource }
-        )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
-      } catch (cause) {
-        onWrapFailure(realUrl, cause)
-        // Revert back to the non-iitm URL
-        url = realUrl
-      }
+    try {
+      const { bindings } = await driveAsync(
+        processModule({ srcUrl: realUrl, context: processContext }),
+        { resolve: cachedResolve, load: parentGetSource }
+      )
+      return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
+    } catch (cause) {
+      onWrapFailure(realUrl, cause)
+      // Revert back to the non-iitm URL
+      url = realUrl
     }
 
     return parentGetSource(url, context)
@@ -751,41 +765,46 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
    * @param {string} url
    * @param {LoadContext} context
    * @param {(url: string, context?: Partial<LoadContext>) => LoadResult} nextLoad
+   * @param {string} realUrl The original module URL.
    */
-  function getSourceSync (url, context, nextLoad) {
-    if (hasIitm(url)) {
-      const realUrl = deleteIitm(url)
-      const specifierData = specifiers.get(realUrl)
-      if (specifierData === undefined) {
-        specifiers.delete(url)
-        return nextLoad(url, context)
-      }
+  function getSourceSync (url, context, nextLoad, realUrl) {
+    const specifierData = specifiers.get(realUrl)
+    if (specifierData === undefined) {
+      specifiers.delete(url)
+      return nextLoad(url, context)
+    }
 
-      let originalSpecifier = specifierData
-      let processContext = context
-      if (typeof specifierData !== 'string') {
-        originalSpecifier = specifierData.specifier
-        processContext = { ...context, format: specifierData.format }
-      }
+    let originalSpecifier = specifierData
+    let processContext = context
+    if (typeof specifierData !== 'string') {
+      originalSpecifier = specifierData.specifier
+      processContext = { ...context, format: specifierData.format }
+    }
 
-      try {
-        const { bindings } = driveSync(
-          processModule({ srcUrl: realUrl, context: processContext }),
-          { resolve: cachedResolve, load: nextLoad }
-        )
-        return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
-      } catch (cause) {
-        onWrapFailure(realUrl, cause)
-        url = realUrl
-      }
+    try {
+      const { bindings } = driveSync(
+        processModule({ srcUrl: realUrl, context: processContext }),
+        { resolve: cachedResolve, load: nextLoad }
+      )
+      return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
+    } catch (cause) {
+      onWrapFailure(realUrl, cause)
+      url = realUrl
     }
 
     return nextLoad(url, context)
   }
 
+  /**
+   * @param {string} url
+   * @param {LoadContext} context
+   * @param {(url: string, context?: Partial<LoadContext>) => LoadResult | Promise<LoadResult>} parentLoad
+   */
   async function load (url, context, parentLoad) {
-    if (hasIitm(url)) {
-      const result = await getSource(url, context, parentLoad)
+    const parsedURL = parseIitm(url)
+    if (parsedURL !== undefined) {
+      const realUrl = deleteIitm(parsedURL)
+      const result = await getSource(url, context, parentLoad, realUrl)
       // If wrapping failed, `getSource()` may have fallen back to `parentLoad`,
       // which can legally return `source: null` (e.g. for non-JS formats).
       if (result && typeof result === 'object' && result.source != null) {
@@ -797,7 +816,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       }
 
       // Fall back to the parent loader with the original (non-iitm) URL.
-      return parentLoad(deleteIitm(url), context)
+      return parentLoad(realUrl, context)
     }
 
     // On Node 22+, when a CJS module is loaded through the ESM translator and
@@ -824,9 +843,16 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
   // Synchronous counterpart to `load`, for `module.registerHooks`. Mirrors the
   // async `load` exactly — wrapping via `getSourceSync` and applying the same
   // CJS-in-iitm-chain source stripping — only without awaiting.
+  /**
+   * @param {string} url
+   * @param {LoadContext} context
+   * @param {(url: string, context?: Partial<LoadContext>) => LoadResult} nextLoad
+   */
   function loadSync (url, context, nextLoad) {
-    if (hasIitm(url)) {
-      const result = getSourceSync(url, context, nextLoad)
+    const parsedURL = parseIitm(url)
+    if (parsedURL !== undefined) {
+      const realUrl = deleteIitm(parsedURL)
+      const result = getSourceSync(url, context, nextLoad, realUrl)
       // If wrapping failed, `getSourceSync()` may have fallen back to `nextLoad`,
       // which can legally return `source: null` (e.g. for non-JS formats).
       if (result && typeof result === 'object' && result.source != null) {
@@ -838,7 +864,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       }
 
       // Fall back to the parent loader with the original (non-iitm) URL.
-      return nextLoad(deleteIitm(url), context)
+      return nextLoad(realUrl, context)
     }
 
     if (cjsInIitmChain.has(url) && !disableCjsSourceStripping) {
