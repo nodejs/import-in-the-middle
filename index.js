@@ -19,23 +19,17 @@ const {
 } = require('./lib/register')
 
 /**
- * Checks turbopack specifiers separately (for Next.js 16+).
- *
- * If turbopack is used, specifiers will have an additional hash appended to the end.
- * Something like "ai" might become "ai-5e7181a616786b24". This only happens in Next.js 16+.
- * Just checking if the baseDir ends with this new specifier won't match, as the baseDir still has the plain package.
- *
- * This logic isolates a new check for checking the actual name in the case turbopack is being used.
- *
- * @param specifier {string}
- * @param baseDir {string}
+ * @param {string} specifier
+ * @param {string} baseDir
+ * @returns {boolean}
  */
-function isTurbopackSpecifier (specifier, baseDir) {
+function isPackageSpecifier (specifier, baseDir) {
+  if (process.platform === 'win32' && specifier.includes('/')) baseDir = baseDir.replaceAll(path.sep, '/')
+  if (baseDir.endsWith(specifier)) return true
   const usingTurbopack = process.env.TURBOPACK ?? process.argv.includes('--turbo')
   if (!usingTurbopack) return false
-
-  const specifierWithoutTurbopackHash = specifier.slice(0, specifier.lastIndexOf('-'))
-  return baseDir.endsWith(specifierWithoutTurbopackHash)
+  const hashSeparator = specifier.lastIndexOf('-')
+  return hashSeparator !== -1 && baseDir.endsWith(specifier.slice(0, hashSeparator))
 }
 
 function addHook (hook) {
@@ -187,7 +181,7 @@ function Hook (modules, options, hookFn) {
           if (!baseDir) {
             // built-in module (or unexpected non file:// name?)
             callHookFn(hookFn, namespace, name, baseDir)
-          } else if (baseDir.endsWith(specifiers.get(loadUrl)) || isTurbopackSpecifier(specifiers.get(loadUrl), baseDir)) {
+          } else if (isPackageSpecifier(specifiers.get(loadUrl), baseDir)) {
             // An import of the top-level module (e.g. `import 'ioredis'`).
             // Note: Slight behaviour difference from RITM. RITM uses
             // `require.resolve(name)` to see if filename is the module
