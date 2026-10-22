@@ -25,6 +25,14 @@ export type HookFn = (exported: Namespace, name: string, baseDir: string|void) =
 
 export type Options = {
   internals?: boolean
+
+  /**
+   * Export bindings that the hook can replace. Bindings not in this list keep
+   * their original live bindings. Use null for nested mutations only.
+   * With internals:true, these permissions apply to each matched package file.
+   * An empty list is also accepted.
+   */
+  replaceExports?: ReadonlyArray<string> | null
 }
 
 export declare class Hook {
@@ -39,9 +47,11 @@ export declare class Hook {
    * `{ internals: false }`. If internals is true, then the hook will operate
    * on internal modules of packages in node_modules. Otherwise it will not,
    * unless they are mentioned specifically in the modules array.
+   * `replaceExports` declares the export bindings that the hook can replace.
+   * Other bindings retain their source module's live binding.
    * @param {HookFunction} hookFn The function to be run on each module.
    */
-  constructor (modules: Array<string>, options: Options, hookFn: HookFn)
+  constructor (modules: Array<string> | undefined, options: Options, hookFn: HookFn)
   constructor (modules: Array<string>, hookFn: HookFn)
   constructor (hookFn: HookFn)
 

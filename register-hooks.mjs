@@ -1,10 +1,11 @@
 import * as module from 'module'
 import { createHook } from './create-hook.mjs'
+import hookRegistry from './lib/register.js'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
 
 export { supportsSyncHooks }
 
-const hook = createHook(import.meta)
+const hook = createHook(import.meta, hookRegistry.listenForHookCapabilities)
 
 let registered = false
 

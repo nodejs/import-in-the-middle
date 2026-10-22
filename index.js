@@ -66,7 +66,7 @@ function addHookInternal (hook, capability) {
  * @returns {void}
  */
 function addHook (hook) {
-  const capability = registerHookCapability(undefined)
+  const capability = registerHookCapability(undefined, undefined)
   sendHookCapabilityToLoader(capability)
   addHookInternal(hook, capability)
 }
@@ -116,6 +116,25 @@ let sendModulesToLoader
  */
 function sendHookCapabilityToLoader (update) {
   sendModulesToLoader?.(update)
+}
+
+/**
+ * @param {object | null} options
+ * @returns {ReadonlyArray<string> | null | undefined}
+ */
+function getReplaceExports (options) {
+  const replaceExports = options?.replaceExports
+  if (replaceExports === undefined) return
+  if (replaceExports === null) return null
+  if (!Array.isArray(replaceExports)) {
+    throw new TypeError("The 'replaceExports' option must be null or an array of export names")
+  }
+  for (let index = 0; index < replaceExports.length; index++) {
+    if (typeof replaceExports[index] !== 'string') {
+      throw new TypeError("The 'replaceExports' option must be null or an array of export names")
+    }
+  }
+  return replaceExports.length === 0 ? null : replaceExports.slice()
 }
 
 /**
@@ -202,8 +221,9 @@ function Hook (modules, options, hookFn) {
     options = null
   }
   const internals = options ? options.internals === true : false
+  const replaceExports = getReplaceExports(options)
 
-  const capability = registerHookCapability(Array.isArray(modules) ? modules : undefined, internals)
+  const capability = registerHookCapability(Array.isArray(modules) ? modules : undefined, replaceExports, internals)
   sendHookCapabilityToLoader(capability)
 
   this._iitmHook = (name, namespace, specifier) => {
