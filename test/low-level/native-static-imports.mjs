@@ -49,7 +49,8 @@ for (const [index, encode] of variants.entries()) {
 for (const mode of ['async', 'sync']) {
   for (const missingSource of [false, true]) {
     const prefix = `file:///shared-bindings-${mode}-${missingSource}`
-    const roots = [1, 2, 3].map(/** @param {number} index */ index => `${prefix}-root-${index}.mjs`)
+    const roots = [1, 2, 3, 4].map(/** @param {number} index */ index => `${prefix}-root-${index}.mjs`)
+    const pendingRoots = roots.slice(0, 3)
     const leaf = `${prefix}-leaf.mjs`
     const hook = createHook(meta)
     const resolveHook = mode === 'sync' ? hook.resolveSync : hook.resolve
@@ -58,19 +59,23 @@ for (const mode of ['async', 'sync']) {
     const resolve = url => ({ url, format: 'module' })
     /** @param {string} url */
     const load = url => ({ format: 'module', source: url === leaf ? `${roots.map(/** @param {string} root */ root => `import '${root}';`).join('\n')} export const value = 1` : `export * from '${leaf}'` })
-    for (const root of roots) {
+    for (const root of pendingRoots) {
       const wrapper = await resolveHook(root, { parentURL: `${prefix}-entry.mjs` }, resolve)
       await loadHook(wrapper.url, { format: 'module' }, load)
     }
+    const nonModule = { format: 'commonjs', source: 'module.exports = {}' }
+    strictEqual(await loadHook(leaf, { format: 'module' }, () => nonModule), nonModule)
     const native = missingSource ? { format: 'module', source: null } : load(leaf)
     const result = await loadHook(leaf, { format: 'module' }, () => native)
     if (missingSource) {
       strictEqual(result, native)
     } else {
-      for (const root of roots) {
+      for (const root of pendingRoots) {
         strictEqual(result.source.includes(`\nimport ${JSON.stringify(`${root}?iitm=bindings`)}\n`), true)
       }
     }
+    const laterWrapper = await resolveHook(roots[3], { parentURL: `${prefix}-entry.mjs` }, resolve)
+    await loadHook(laterWrapper.url, { format: 'module' }, load)
     strictEqual(await loadHook(leaf, { format: 'module' }, () => native), native)
   }
 }

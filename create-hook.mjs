@@ -226,7 +226,7 @@ function shouldExcludeExport (name, sourceUrl) {
  */
 function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen, cycleState, getCycleGraph }) {
   let isCycleRoot = false
-  const moduleExports = yield * getModuleExports(srcUrl, context)
+  const moduleExports = yield * getModuleExports(srcUrl, context, cycleState !== undefined)
   const { exportNames, starReexports } = moduleExports
 
   if (cycleState !== undefined && moduleExports.hasModuleImports) {
@@ -395,7 +395,7 @@ function * findCyclicImports (url, context, cycleState, seen, graph) {
     if (node.visited) return
     node.visited = true
   }
-  const { moduleImports } = yield * getModuleExports(url, context)
+  const { moduleImports } = yield * getModuleExports(url, context, true)
   if (moduleImports === undefined) return
 
   for (const imported of moduleImports) {
@@ -470,8 +470,6 @@ function addIitm (url, kind = 'true') {
 export function createHook (meta) {
   /** @type {Map<string, SpecifierData>} */
   const specifiers = new Map()
-  /** @type {Set<string>} */
-  const nativeModules = new Set()
   let cachedResolve
   /** @type {CycleGraph | undefined} */
   let cycleGraph
@@ -490,18 +488,19 @@ export function createHook (meta) {
    * @param {LoadResult} result The actual native load result.
    */
   function prepareNativeSource (url, result) {
-    if (result.format !== 'module' && result.format !== 'module-typescript') return result
-    nativeModules.add(url)
     const targets = cyclicImportTargets?.get(url)
-    if (targets === undefined) return result
-    cyclicImportTargets.delete(url)
-    if (cyclicImportTargets.size === 0) cyclicImportTargets = undefined
-    if (result.source == null) return result
+    if (targets === undefined || targets.size === 0 ||
+        (result.format !== 'module' && result.format !== 'module-typescript')) return result
 
     let bindingImports = ''
-    for (const target of targets) {
-      bindingImports += `\nimport ${JSON.stringify(addIitm(target, 'bindings'))}\n`
+    if (result.source != null) {
+      for (const target of targets) {
+        bindingImports += `\nimport ${JSON.stringify(addIitm(target, 'bindings'))}\n`
+      }
     }
+    // A consumed target must not be queued again by a later barrel.
+    targets.clear()
+    if (bindingImports === '') return result
     // Original dependencies must initialize before the cycle's shared bindings.
     return { ...result, source: sourceToString(result.source) + bindingImports }
   }
@@ -512,12 +511,13 @@ export function createHook (meta) {
    */
   function mergeCyclicImports (imports, targetURL) {
     for (const parentURL of imports) {
-      if (nativeModules.has(parentURL)) continue
       cyclicImportTargets ??= new Map()
       let targets = cyclicImportTargets.get(parentURL)
       if (targets === undefined) {
         targets = new Set()
         cyclicImportTargets.set(parentURL, targets)
+      } else if (targets.size === 0) {
+        continue
       }
       targets.add(targetURL)
     }
