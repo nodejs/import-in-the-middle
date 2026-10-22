@@ -214,9 +214,7 @@ function shouldExcludeExport (name, sourceUrl) {
  * for a module with no `export *`.
  */
 function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen }) {
-  const { exportNames, starReexports } = yield * getModuleExports(srcUrl, context)
-  // Resolving star targets can change the loader context's format.
-  const format = context.format
+  const { exportNames, starReexports, format } = yield * getModuleExports(srcUrl, context)
 
   // Most modules have no export star. Keep that path array-backed so it pays
   // neither merge bookkeeping nor a Map lookup for each direct export.
