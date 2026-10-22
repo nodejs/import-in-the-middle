@@ -115,6 +115,11 @@ fs.readFileSync('file.txt')
 node --import=./instrument.mjs ./my-app.mjs
 ```
 
+## Development benchmarks
+
+See [benchmark/README.md](benchmark/README.md) for the PR benchmark method and
+how to check measurement noise locally.
+
 ## Synchronous loader hooks
 
 On Node.js versions that support
