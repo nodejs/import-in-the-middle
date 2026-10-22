@@ -5,6 +5,7 @@
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules } from 'module'
+import { isAbsolute } from 'path'
 import { getModuleExports } from './lib/get-exports.mjs'
 import { sourceToString } from './lib/get-esm-exports.mjs'
 import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
@@ -45,17 +46,18 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
  * @property {string[] | Map<string, string | StarBinding>} bindings
  * @property {Map<string, string> | undefined} origins
  * @property {string | undefined} format
- * @property {Map<string, string> | undefined} [cyclicImports]
+ * @property {Set<string> | undefined} [cyclicImports]
  */
 /**
  * @typedef {object} CycleState
  * @property {string} rootUrl
- * @property {Map<string, string> | undefined} imports
+ * @property {Set<string> | undefined} imports
  */
 
 /** @param {string} url The module URL or specifier. */
 function parseIitm (url) {
-  if (typeof url !== 'string' || url.indexOf('?') === -1 || url.indexOf('iitm') === -1) return
+  const queryIndex = url.indexOf('?')
+  if (queryIndex === -1 || url.indexOf('iitm', queryIndex) === -1) return
   try {
     const parsed = new URL(url)
     if (parsed.searchParams.has('iitm')) return parsed
@@ -219,21 +221,14 @@ function shouldExcludeExport (name, sourceUrl) {
  * modules. `origins` (the defining module per `*`-sourced name) is `undefined`
  * for a module with no `export *`.
  */
-function * processModule ({
-  srcUrl,
-  context,
-  excludeDefault = false,
-  depth = 0,
-  seen,
-  cycleState
-}) {
+function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen, cycleState }) {
   let isCycleRoot = false
   const moduleExports = yield * getModuleExports(srcUrl, context)
   const { exportNames, starReexports, format } = moduleExports
 
   if (cycleState !== undefined && moduleExports.hasModuleImports) {
-    cycleState.imports ??= new Map()
-    cycleState.imports.set(srcUrl, cycleState.rootUrl)
+    cycleState.imports ??= new Set()
+    cycleState.imports.add(srcUrl)
   }
 
   // Most modules have no export star. Keep that path array-backed so it pays
@@ -357,7 +352,7 @@ function * processModule ({
     const candidates = cycleState.imports
     cycleState.imports = undefined
     const seenImports = new Set()
-    for (const candidate of candidates.keys()) {
+    for (const candidate of candidates) {
       yield * findCyclicImports(candidate, context, cycleState, seenImports)
     }
   }
@@ -383,8 +378,8 @@ function * findCyclicImports (url, context, cycleState, seen) {
     const importAttributes = imported.attributes === null ? {} : Object.fromEntries(imported.attributes)
     const result = yield [RESOLVE, imported.specifier, { parentURL: url, importAttributes }]
     if (result.url === cycleState.rootUrl) {
-      cycleState.imports ??= new Map()
-      cycleState.imports.set(url, result.url)
+      cycleState.imports ??= new Set()
+      cycleState.imports.add(url)
     } else if (result.format === 'module' || result.format === 'module-typescript' || result.format === undefined) {
       yield * findCyclicImports(result.url, { ...context, format: result.format, importAttributes }, cycleState, seen)
     }
@@ -421,7 +416,7 @@ export function createHook (meta) {
   let includeModules, excludeModules
   let shouldInclude = defaultShouldInclude
   let disableCjsSourceStripping = false
-  /** @type {Map<string, string | Set<string>> | undefined} */
+  /** @type {Map<string, Set<string>> | undefined} */
   let cyclicImportTargets
   /** @type {Map<string, string> | undefined} */
   let cyclicSources
@@ -440,37 +435,27 @@ export function createHook (meta) {
     if (result.source == null) return result
 
     let bindingImports = ''
-    if (typeof targets === 'string') {
-      bindingImports = `\nimport ${JSON.stringify(addIitm(targets, 'bindings'))}\n`
-    } else {
-      for (const target of targets) {
-        bindingImports += `\nimport ${JSON.stringify(addIitm(target, 'bindings'))}\n`
-      }
+    for (const target of targets) {
+      bindingImports += `\nimport ${JSON.stringify(addIitm(target, 'bindings'))}\n`
     }
     // Original dependencies must initialize before the cycle's shared bindings.
     return { ...result, source: sourceToString(result.source) + bindingImports }
   }
 
   /**
-   * @param {Map<string, string>} imports Cycle candidates grouped by importing module.
+   * @param {Set<string>} imports The cycle's closing importers.
+   * @param {string} targetURL The wrapper root URL.
    */
-  function mergeCyclicImports (imports) {
-    for (const [parentURL, targetURL] of imports) {
+  function mergeCyclicImports (imports, targetURL) {
+    for (const parentURL of imports) {
       if (nativeModules.has(parentURL)) continue
       cyclicImportTargets ??= new Map()
-      const previous = cyclicImportTargets.get(parentURL)
-      if (previous === undefined) {
-        cyclicImportTargets.set(parentURL, targetURL)
-      } else if (typeof previous === 'string') {
-        if (previous !== targetURL) {
-          const targets = new Set()
-          targets.add(previous)
-          targets.add(targetURL)
-          cyclicImportTargets.set(parentURL, targets)
-        }
-      } else {
-        previous.add(targetURL)
+      let targets = cyclicImportTargets.get(parentURL)
+      if (targets === undefined) {
+        targets = new Set()
+        cyclicImportTargets.set(parentURL, targets)
       }
+      targets.add(targetURL)
     }
   }
 
@@ -502,7 +487,7 @@ export function createHook (meta) {
     function match (each) {
       if (each instanceof RegExp) return each.test(url)
       if (each === specifier || each === url) return true
-      if (!each.startsWith('/') && !(isWin && (each.startsWith('\\') || each[1] === ':'))) return false
+      if (!isAbsolute(each)) return false
 
       if (resultPath === undefined) {
         resultPath = ''
@@ -590,7 +575,8 @@ export function createHook (meta) {
     // are evaluated, and can make them exit without doing anything.
     if (parentURL === '') {
       if (!EXTENSION_RE.test(result.url) && !hasIitm(result.url)) {
-        return { url: result.url, format: 'commonjs' }
+        // Extensionless CLIs can be ESM; preserve the format resolved by Node or an upstream loader.
+        return { url: result.url, format: result.format ?? 'commonjs' }
       }
       return result
     }
@@ -755,6 +741,7 @@ export function createHook (meta) {
     let bindingNames = ''
     let bindingSources
     let exportSpecifiers = ''
+    let facadeSpecifiers = ''
     let writeCases = ''
     let index = 0
     for (const binding of bindings.values()) {
@@ -783,10 +770,15 @@ export function createHook (meta) {
       }
       writeCases += `    case ${index++}: ${variableName} = value; break\n`
       if (shouldReexport(name, realUrl)) {
-        const exportName = name === 'default' ? name : objectKey
+        const exportSpecifier = staged ? variableName : `${variableName} as ${name === 'default' ? name : objectKey}`
+        if (staged) {
+          facadeSpecifiers += facadeSpecifiers === ''
+            ? `${variableName} as ${objectKey}`
+            : `, ${variableName} as ${objectKey}`
+        }
         exportSpecifiers += exportSpecifiers === ''
-          ? `${variableName} as ${exportName}`
-          : `, ${variableName} as ${exportName}`
+          ? exportSpecifier
+          : `, ${exportSpecifier}`
       }
     }
     const binder = declarationNames === ''
@@ -802,17 +794,18 @@ const __binder = new ModuleBinder(namespace, [${bindingNames}], __write${binding
 `
     const reexports = exportSpecifiers === '' ? '' : `export { ${exportSpecifiers} }\n`
 
-    return `
-import { ${staged ? 'stage' : 'register'}, ModuleBinder } from ${JSON.stringify(iitmURL)}
+    const source = `
+import { ${staged ? '' : 'register, '}ModuleBinder } from ${JSON.stringify(iitmURL)}
 import * as namespace from ${JSON.stringify(realUrl)}
 ${originImports}
 ${binder}
 ${reexports}
 
 ${staged
-  ? 'stage(namespace, __binder)'
+  ? 'export default __binder'
   : `__binder.flush()\n\nregister(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifier)}, ${JSON.stringify(format)})`}
 `
+    return staged ? { source, facadeSpecifiers } : source
   }
 
   /**
@@ -831,17 +824,17 @@ ${staged
     if (cyclicImports === undefined) return buildWrapperSource(realUrl, bindings, originalSpecifier, format)
 
     const bindingURL = addIitm(realUrl, 'bindings')
-    const source = buildWrapperSource(realUrl, bindings, originalSpecifier, format, true)
+    const { source, facadeSpecifiers } = buildWrapperSource(realUrl, bindings, originalSpecifier, format, true)
     cyclicSources ??= new Map()
     cyclicSources.set(bindingURL, source)
-    mergeCyclicImports(cyclicImports)
-    const hasDefault = bindings.has('default')
+    mergeCyclicImports(cyclicImports, realUrl)
     return `
-import * as namespace from ${JSON.stringify(realUrl)}
-export * from ${JSON.stringify(bindingURL)}
-${hasDefault ? `export { default } from ${JSON.stringify(bindingURL)}\n` : ''}
-import { registerStaged } from ${JSON.stringify(iitmURL)}
-registerStaged(${JSON.stringify(realUrl)}, namespace, ${JSON.stringify(originalSpecifier)}, ${JSON.stringify(format)})
+import ${JSON.stringify(realUrl)}
+import __binder from ${JSON.stringify(bindingURL)}
+export { ${facadeSpecifiers} } from ${JSON.stringify(bindingURL)}
+import { register } from ${JSON.stringify(iitmURL)}
+__binder.flushSync()
+register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifier)}, ${JSON.stringify(format)})
 `
   }
 
