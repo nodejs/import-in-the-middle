@@ -18,6 +18,10 @@ new Hook((exported: any, name: string, baseDir: string|void)  => {
 
 });
 
+new Hook(['say-hi'], { replaceExports: ['sayHi'] as const }, () => {})
+new Hook(['say-hi'], { replaceExports: null }, () => {}).unhook()
+new Hook(undefined, { replaceExports: [] }, () => {}).unhook()
+
 assert.equal(sayHi('test'), 'Hooked')
 
 new Hook((exported, name, baseDir, format) => {
