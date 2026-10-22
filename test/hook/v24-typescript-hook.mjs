@@ -10,10 +10,12 @@ import Hook from '../../index.js'
 let esmExports
 let cjsExports
 
-const hook = new Hook((exports, name) => {
+const hook = new Hook((exports, name, baseDir, format) => {
   if (name.endsWith('typescript-hook.mts')) {
+    strictEqual(format, 'module-typescript')
     esmExports = Object.keys(exports)
   } else if (name.endsWith('typescript-cjs-hook.cts')) {
+    strictEqual(format, 'commonjs')
     cjsExports = Object.keys(exports)
   }
 })

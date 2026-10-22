@@ -31,6 +31,13 @@ Hook(['package-i-want-to-modify'], (exported, name, baseDir) => {
 console.log(foo) // 1 more than whatever that module exported
 ```
 
+Hook callbacks receive an optional fourth argument, `format`, with the wrapped
+module's loader format. CommonJS modules report `commonjs`, including type-stripped
+CommonJS. Other formats retain the loader's value. This argument is also available
+to `addHook` callbacks, after the original import specifier. Hooks registered after
+an import receive the same format during replay. Older generated wrappers provide
+`undefined`, so consumers must handle missing format metadata.
+
 This requires the use of an ESM loader hook, which can be added with the following
 command-line option.
 
