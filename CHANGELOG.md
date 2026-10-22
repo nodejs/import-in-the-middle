@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.5.3](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.5.2...import-in-the-middle-v3.5.3) (2026-10-22)
+
+
+### Bug Fixes
+
+* **esm:** ignore source supplied for builtin modules ([#305](https://github.com/nodejs/import-in-the-middle/issues/305)) ([232f569](https://github.com/nodejs/import-in-the-middle/commit/232f5692e824c566c9c2047b0a4c4596e66ea679))
+* **hooks:** match scoped packages on Windows ([#309](https://github.com/nodejs/import-in-the-middle/issues/309)) ([62c2ea4](https://github.com/nodejs/import-in-the-middle/commit/62c2ea442d34037678c483d4d8abf56e4eaec26b))
+* **loader:** preserve resolved format for extensionless entrypoints ([#300](https://github.com/nodejs/import-in-the-middle/issues/300)) ([9c7049d](https://github.com/nodejs/import-in-the-middle/commit/9c7049df44455633c35e2424e9c7ba9cfe545d0b))
+* strip TypeScript before export discovery ([#297](https://github.com/nodejs/import-in-the-middle/issues/297)) ([30e19c9](https://github.com/nodejs/import-in-the-middle/commit/30e19c9e9a3d844b1c6430f0ae3e1a695f559da4))
+
+
+### Performance Improvements
+
+* **loader:** avoid redundant URL and filter work ([#303](https://github.com/nodejs/import-in-the-middle/issues/303)) ([1089a18](https://github.com/nodejs/import-in-the-middle/commit/1089a18ce9c9495c7c920bd0ef207dd5f559afec))
+
 ## [3.5.2](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.5.1...import-in-the-middle-v3.5.2) (2026-09-30)
 
 
