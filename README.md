@@ -275,4 +275,6 @@ On Node.js versions where type stripping is not enabled by default, run with
   not supported and will be instrumented with the export set from its first
   load. Idempotent transforms (type stripping, AST instrumentation, minifiers)
   are unaffected, and the actual module still executes the source its real load
-  returns; only the interceptable export *names* are memoized.
+  returns.
+* With synchronous hooks, a module's static imports and their resolved URLs
+  must remain stable. The cycle detector reuses the first graph it resolves.

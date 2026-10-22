@@ -42,11 +42,7 @@ assert.deepEqual(
     exportNames: ['other', 'value'],
     starReexports: [{ specifier: 'star', parentURL: 'file:///parent.mjs' }],
     hasModuleImports: true,
-    moduleImports: [
-      { specifier: 'dependency', attributes: null },
-      { specifier: 'star', attributes: null },
-      { specifier: 'named', attributes: null }
-    ],
+    moduleImports: ['dependency', 'star', 'named'],
     hasModuleSyntax: true
   }
 )
@@ -54,7 +50,7 @@ assert.deepEqual(lexEsm('export * from "star"', 'file:///parent.mjs', true), {
   exportNames: [],
   starReexports: [{ specifier: 'star', parentURL: 'file:///parent.mjs' }],
   hasModuleImports: false,
-  moduleImports: [{ specifier: 'star', attributes: null }],
+  moduleImports: ['star'],
   hasModuleSyntax: true
 })
 assert.deepEqual(
