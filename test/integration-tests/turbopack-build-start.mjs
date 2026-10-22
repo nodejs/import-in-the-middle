@@ -7,7 +7,7 @@ import path from 'path'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appDir = path.resolve(__dirname, '..', 'fixtures', 'test-nextjs-app')
 const iitmDir = path.resolve(__dirname, '..', '..')
-const hookSetup = path.join(appDir, 'iitm-hook-setup.cjs')
+const hookSetup = path.join(appDir, 'iitm-hook-setup.mjs')
 const nextBin = path.join(appDir, 'node_modules', '.bin', 'next')
 const PORT = 3100
 
@@ -35,7 +35,7 @@ const hookTriggered = await new Promise((resolve, reject) => {
     cwd: appDir,
     env: {
       ...process.env,
-      NODE_OPTIONS: `--no-warnings --experimental-loader ${path.join(iitmDir, 'hook.mjs')} --require ${hookSetup}`,
+      NODE_OPTIONS: `--no-warnings --import ${hookSetup}`,
       IITM_PATH: path.join(iitmDir, 'index.js')
     }
   })
