@@ -53,6 +53,9 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
  * @property {Set<string> | undefined} imports
  */
 
+/** @typedef {{ visited: boolean, importers: Set<string> | undefined }} CycleNode */
+/** @typedef {Map<string, CycleNode>} CycleGraph */
+
 /** @param {string} url The module URL or specifier. */
 function parseIitm (url) {
   const queryIndex = url.indexOf('?')
@@ -214,13 +217,14 @@ function shouldExcludeExport (name, sourceUrl) {
  * before descending into its subtree and removed once that subtree finishes, so
  * it tracks the active path rather than every URL ever visited.
  * @param {CycleState} [params.cycleState] The wrapper root and detected cycle edges.
+ * @param {() => CycleGraph} [params.getCycleGraph] Persistent graph for synchronous hooks.
  * @returns {Generator<Array, ProcessResult>}
  * A generator that yields I/O operations and ultimately returns the shimmed
  * bindings for all the exports from the module and any transitive export all
  * modules. `origins` (the defining module per `*`-sourced name) is `undefined`
  * for a module with no `export *`.
  */
-function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen, cycleState }) {
+function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen, cycleState, getCycleGraph }) {
   let isCycleRoot = false
   const moduleExports = yield * getModuleExports(srcUrl, context)
   const { exportNames, starReexports } = moduleExports
@@ -350,9 +354,23 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
   if (isCycleRoot && cycleState.imports !== undefined) {
     const candidates = cycleState.imports
     cycleState.imports = undefined
-    const seenImports = new Set()
+    const graph = getCycleGraph?.()
+    const seenImports = graph === undefined ? new Set() : undefined
     for (const candidate of candidates) {
-      yield * findCyclicImports(candidate, context, cycleState, seenImports)
+      yield * findCyclicImports(candidate, context, cycleState, seenImports, graph)
+    }
+    if (graph !== undefined) {
+      const importers = graph.get(srcUrl)?.importers
+      if (importers !== undefined) {
+        let seenImporters
+        for (const importer of importers) {
+          if (candidates.has(importer) || hasCandidateImporter(importer, srcUrl, candidates, graph, seenImporters ??= new Set())) {
+            cycleState.imports ??= new Set()
+            cycleState.imports.add(importer)
+          }
+          seenImporters?.clear()
+        }
+      }
     }
   }
 
@@ -365,24 +383,69 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
  * @param {string} url The module whose static requests can close the cycle.
  * @param {LoadContext} context The metadata load context.
  * @param {CycleState} cycleState The wrapper root and its closing importers.
- * @param {Set<string>} seen Modules already inspected for this wrapper.
+ * @param {Set<string> | undefined} seen Modules already inspected for this wrapper.
+ * @param {CycleGraph} [graph] Resolved reverse graph owned by the synchronous hook.
  */
-function * findCyclicImports (url, context, cycleState, seen) {
-  if (seen.has(url)) return
-  seen.add(url)
+function * findCyclicImports (url, context, cycleState, seen, graph) {
+  if (graph === undefined) {
+    if (seen.has(url)) return
+    seen.add(url)
+  } else {
+    const node = getCycleNode(graph, url)
+    if (node.visited) return
+    node.visited = true
+  }
   const { moduleImports } = yield * getModuleExports(url, context)
   if (moduleImports === undefined) return
 
   for (const imported of moduleImports) {
-    const importAttributes = imported.attributes === null ? {} : Object.fromEntries(imported.attributes)
-    const result = yield [RESOLVE, imported.specifier, { parentURL: url, importAttributes }]
-    if (result.url === cycleState.rootUrl) {
+    const specifier = typeof imported === 'string' ? imported : imported.specifier
+    const importAttributes = typeof imported === 'string' ? {} : Object.fromEntries(imported.attributes)
+    const result = yield [RESOLVE, specifier, { parentURL: url, importAttributes }]
+    if (graph === undefined && result.url === cycleState.rootUrl) {
       cycleState.imports ??= new Set()
       cycleState.imports.add(url)
-    } else if (result.format === 'module' || result.format === 'module-typescript' || result.format === undefined) {
-      yield * findCyclicImports(result.url, { ...context, format: result.format, importAttributes }, cycleState, seen)
+    } else if (result.url === cycleState.rootUrl || result.format === 'module' || result.format === 'module-typescript' || result.format === undefined) {
+      if (graph !== undefined) {
+        const target = getCycleNode(graph, result.url)
+        ;(target.importers ??= new Set()).add(url)
+      }
+      yield * findCyclicImports(result.url, { ...context, format: result.format, importAttributes }, cycleState, seen, graph)
     }
   }
+}
+
+/**
+ * @param {CycleGraph} graph
+ * @param {string} url
+ */
+function getCycleNode (graph, url) {
+  let node = graph.get(url)
+  if (node === undefined) {
+    node = { visited: false, importers: undefined }
+    graph.set(url, node)
+  }
+  return node
+}
+
+/**
+ * @param {string} url
+ * @param {string} root
+ * @param {Set<string>} candidates
+ * @param {CycleGraph} graph
+ * @param {Set<string>} seen
+ */
+function hasCandidateImporter (url, root, candidates, graph, seen) {
+  if (candidates.has(url)) return true
+  if (url === root || seen.has(url)) return false
+  seen.add(url)
+  const importers = graph.get(url)?.importers
+  if (importers !== undefined) {
+    for (const importer of importers) {
+      if (hasCandidateImporter(importer, root, candidates, graph, seen)) return true
+    }
+  }
+  return false
 }
 
 /**
@@ -410,6 +473,8 @@ export function createHook (meta) {
   /** @type {Set<string>} */
   const nativeModules = new Set()
   let cachedResolve
+  /** @type {CycleGraph | undefined} */
+  let cycleGraph
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   const createHookURL = meta.url.replace('hook.mjs', 'create-hook.mjs')
   let includeModules, excludeModules
@@ -889,6 +954,10 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
     return parentGetSource(url, context)
   }
 
+  function getCycleGraph () {
+    return (cycleGraph ??= new Map())
+  }
+
   // Synchronous counterpart to `getSource`, for `module.registerHooks`. Drives
   // `processModule` straight through; all bookkeeping and source generation is
   // shared with `getSource`.
@@ -914,12 +983,13 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
 
     try {
       const result = driveSync(
-        processModule({ srcUrl: realUrl, context: processContext }),
+        processModule({ srcUrl: realUrl, context: processContext, getCycleGraph }),
         { resolve: cachedResolve, load: nextLoad }
       )
       const source = onWrapSuccess(realUrl, processContext, originalSpecifier, result)
       return { source }
     } catch (cause) {
+      cycleGraph = undefined
       onWrapFailure(realUrl, cause)
       url = realUrl
     }
