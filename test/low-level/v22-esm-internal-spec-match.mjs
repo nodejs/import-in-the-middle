@@ -5,8 +5,8 @@
 import { createAddHookMessageChannel, Hook } from '../../index.js'
 import { register } from 'module'
 import { fileURLToPath, pathToFileURL } from 'url'
-import { dirname, resolve } from 'path'
-import { equal, deepStrictEqual } from 'assert'
+import { dirname, resolve, sep } from 'path'
+import { strictEqual, deepStrictEqual } from 'node:assert/strict'
 
 import test from 'node:test'
 
@@ -24,56 +24,52 @@ const hookModuleURL = String(pathToFileURL(
 
 register(hookModuleURL, import.meta.url, registerOptions)
 
-Hook(['some-external-module'], { internals: true }, (exported, name) => {
-  equal(name, 'some-external-module')
-  exported.foo += '-mutated'
-})
-
-Hook(['some-external-cjs-module'], { internals: true }, (exported, name) => {
-  equal(name, 'some-external-cjs-module')
-  exported.foo += '-mutated (cjs)'
-})
-
-Hook(['@scope/some-scoped-module'], { internals: true }, (exported, name) => {
-  equal(name, '@scope/some-scoped-module')
-  exported.foo += '-mutated'
-})
-
-Hook(['@scope/some-scoped-cjs-module'], { internals: true }, (exported, name) => {
-  equal(name, '@scope/some-scoped-cjs-module')
-  exported.foo += '-mutated (cjs)'
-})
-
-Hook(['some-external-module'], { internals: false }, (_, name) => {
-  equal(name, 'some-external-module')
-})
-
-Hook(['some-external-cjs-module'], { internals: false }, (_, name) => {
-  equal(name, 'some-external-cjs-module')
-})
-
-Hook(['@scope/some-scoped-module'], { internals: false }, (_, name) => {
-  equal(name, '@scope/some-scoped-module')
-})
-
-Hook(['@scope/some-scoped-cjs-module'], { internals: false }, (_, name) => {
-  equal(name, '@scope/some-scoped-cjs-module')
-})
+let entryCalls = 0
+for (const [packageName, extension, suffix] of [
+  ['some-external-module', 'mjs', '-mutated'],
+  ['some-external-cjs-module', 'js', '-mutated (cjs)'],
+  ['@scope/some-scoped-module', 'mjs', '-mutated'],
+  ['@scope/some-scoped-cjs-module', 'js', '-mutated (cjs)']
+]) {
+  Hook([packageName], { internals: true },
+    /**
+     * @param {{ foo?: string, bar?: string }} exported
+     * @param {string} name
+     */
+    (exported, name) => {
+      if (name === packageName) {
+        exported.foo += suffix
+      } else {
+        strictEqual(name, `${packageName}${sep}sub.${extension}`)
+        exported.bar += suffix
+      }
+    })
+  Hook([packageName], { internals: false },
+    /**
+     * @param {object} exported
+     * @param {string} name
+     */
+    (exported, name) => {
+      entryCalls++
+      strictEqual(name, packageName)
+    })
+}
 
 await waitForAllMessagesAcknowledged()
 
-test('loading hooked modules and submodules', async () => {
+test('loading hooked modules and submodules with package internals enabled', async () => {
   const results = await import('../fixtures/load-external-modules.mjs')
   const expect = {
     scoped: 'bar-mutated',
-    scopedsub: 'baz',
+    scopedsub: 'baz-mutated',
     scopedCJS: 'bar-mutated (cjs)',
-    scopedCJSsub: 'baz',
+    scopedCJSsub: 'baz-mutated (cjs)',
     unscoped: 'bar-mutated',
-    unscopedsub: 'baz',
+    unscopedsub: 'baz-mutated',
     unscopedCJS: 'bar-mutated (cjs)',
-    unscopedCJSsub: 'baz'
+    unscopedCJSsub: 'baz-mutated (cjs)'
   }
 
   deepStrictEqual(Object.assign({}, results), expect)
+  strictEqual(entryCalls, 4)
 })
