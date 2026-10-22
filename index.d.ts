@@ -18,10 +18,13 @@ export type Namespace = { [key: string]: any }
  * starting from the package name.
  * @param {baseDir} string The absolute path of the module, if not provided in
  * `name`.
+ * @param {format} string The loader format, when available. CommonJS modules
+ * report `commonjs`, including type-stripped CommonJS. Older generated wrappers
+ * provide `undefined`.
  * @return any A value that can will be assigned to `exports.default`. This is
  * equivalent to doing that assignment in the body of this function.
  */
-export type HookFn = (exported: Namespace, name: string, baseDir: string|void) => any
+export type HookFn = (exported: Namespace, name: string, baseDir: string|void, format?: string) => any
 
 export type Options = {
   internals?: boolean
@@ -60,8 +63,11 @@ export default Hook
  * @param {url} string The absolute path of the module, as a `file:` URL string.
  * @param {exported} { [string]: any } An object representing the exported
  * items of a module.
+ * @param {specifier} string The original import specifier, when available.
+ * @param {format} string The loader format, when available. Older generated
+ * wrappers provide `undefined`.
  */
-export type HookFunction = (url: string, exported: Namespace) => void
+export type HookFunction = (url: string, exported: Namespace, specifier?: string, format?: string) => void
 
 /**
  * Adds a hook to be run on any already loaded modules and any that will be

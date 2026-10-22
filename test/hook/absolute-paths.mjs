@@ -10,8 +10,8 @@ Hook([
   `${TOP}/test/fixtures/something.js`,
   `${TOP}/test/fixtures/node_modules/some-external-module/index.mjs`,
   `${TOP}/test/fixtures/node_modules/some-external-module/sub.mjs`
-], (_, name, baseDir) => {
-  hooked.push([name, baseDir])
+], (_, name, baseDir, format) => {
+  hooked.push([name, baseDir, format])
 })
 
 ;(async () => {
@@ -30,10 +30,10 @@ Hook([
   deepStrictEqual(
     hooked,
     [
-      [`${TOP}/test/fixtures/index.js`, undefined],
-      [`${TOP}/test/fixtures/something.js`, undefined],
-      [`${TOP}/test/fixtures/node_modules/some-external-module/index.mjs`, undefined],
-      [`${TOP}/test/fixtures/node_modules/some-external-module/sub.mjs`, undefined]
+      [`${TOP}/test/fixtures/index.js`, undefined, 'commonjs'],
+      [`${TOP}/test/fixtures/something.js`, undefined, 'commonjs'],
+      [`${TOP}/test/fixtures/node_modules/some-external-module/index.mjs`, undefined, 'module'],
+      [`${TOP}/test/fixtures/node_modules/some-external-module/sub.mjs`, undefined, 'module']
     ]
   )
 })()

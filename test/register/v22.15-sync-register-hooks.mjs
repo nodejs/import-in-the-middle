@@ -77,10 +77,18 @@ let collisionHooked = false
 let starBuiltinExports
 let typescriptCjsExports
 let wrapFailureHooked = false
+const formats = new Map()
+let detectedFormat
+const detectedHook = new Hook([
+  fileURLToPath(new URL('../fixtures/node_modules/some-external-cjs-module/sub.js', import.meta.url))
+], (exports, name, baseDir, format) => {
+  detectedFormat = format
+})
 
 // No module filter: match fixtures by file name, mirroring test/hook/static-import.mjs.
 // eslint-disable-next-line no-new
-new Hook((exports, name) => {
+new Hook((exports, name, baseDir, format) => {
+  formats.set(name, format)
   if (typeof name === 'string' && /something\.mjs/.test(name)) {
     somethingHooked = true
     exports.foo += 15
@@ -136,6 +144,15 @@ strictEqual(wrapFailureHooked, false, 'unwrapped module cannot be hooked')
 // transitive require() calls bypass IITM (cjsInIitmChain), otherwise the
 // generated wrapper cannot be linked synchronously (ERR_VM_MODULE_LINK_FAILURE).
 const cjs = await import('../fixtures/cjs-transitive-a.js')
+await import('../fixtures/typescript-hook.mts')
+const detected = await import('../fixtures/node_modules/some-external-cjs-module/star.mjs')
+strictEqual(detected.bar, 'baz')
+strictEqual(detectedFormat, 'module')
+detectedHook.unhook()
+strictEqual(formats.get(fileURLToPath(new URL('../fixtures/something.mjs', import.meta.url))), 'module')
+strictEqual(formats.get(fileURLToPath(new URL('../fixtures/cjs-transitive-a.js', import.meta.url))), 'commonjs')
+strictEqual(formats.get(fileURLToPath(new URL('../fixtures/typescript-cjs-hook.cts', import.meta.url))), 'commonjs')
+strictEqual(formats.get(fileURLToPath(new URL('../fixtures/typescript-hook.mts', import.meta.url))), 'module-typescript')
 strictEqual(cjs.default.own, 'top', 'top-level CJS export should be accessible')
 strictEqual(cjs.default.fromB, 'middle', 'middle CJS export should propagate')
 strictEqual(cjs.default.fromC, 'deep', 'deep CJS export should propagate')
