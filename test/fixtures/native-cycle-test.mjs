@@ -1,7 +1,7 @@
 import { rejects, strictEqual } from 'node:assert/strict'
 import { once } from 'node:events'
 import { register } from 'node:module'
-import { MessageChannel } from 'node:worker_threads'
+import { MessageChannel, Worker } from 'node:worker_threads'
 
 import Hook from '../../index.js'
 
@@ -22,24 +22,28 @@ export async function testNativeCycle (mode) {
   })
   register(new URL('../../hook.mjs', import.meta.url), { data: { include: [rootURL] } })
   let hooked = 0
+  const hookCount = mode === 'race' ? new Int32Array(new SharedArrayBuffer(4)) : undefined
+  let controller
   /**
    * @param {Record<string, unknown>} exports
    * @param {string} name
    */
   const hook = new Hook((exports, name) => {
-    if (name.endsWith(`native-cycle-${mode}-root.mjs`)) hooked++
+    if (name.endsWith(`native-cycle-${mode}-root.mjs`)) {
+      hooked++
+      if (hookCount !== undefined) Atomics.add(hookCount, 0, 1)
+    }
   })
   try {
     if (mode === 'race') {
-      const leafPending = once(port1, 'message')
-      const leafImport = import(leafURL)
-      strictEqual((await Promise.race([leafPending, leafImport]))[0], 'leaf-pending')
-      const rootScanned = once(port1, 'message')
-      port1.postMessage('scan-root')
-      strictEqual((await Promise.race([rootScanned, leafImport]))[0], 'root-scanned')
-      strictEqual(hooked, 0)
-      port1.postMessage('continue')
-      const leaf = await leafImport
+      // Native linking can block this thread before import() returns its promise.
+      controller = new Worker(new URL('./native-cycle-controller.mjs', import.meta.url), {
+        workerData: { port: port1, hooked: hookCount },
+        transferList: [port1]
+      })
+      const completed = once(controller, 'exit')
+      const [leaf, [exitCode]] = await Promise.all([import(leafURL), completed])
+      strictEqual(exitCode, 0)
       strictEqual(hooked, 1)
       const root = await import(rootURL)
       strictEqual(leaf.RegistryError.prototype instanceof root.UserError, true)
@@ -51,6 +55,7 @@ export async function testNativeCycle (mode) {
     }
   } finally {
     hook.unhook()
+    await controller?.terminate()
     port1.close()
   }
 }
