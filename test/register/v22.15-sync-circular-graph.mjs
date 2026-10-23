@@ -65,7 +65,7 @@ const hook = new Hook(/**
     }
   })
 register()
-let unrelatedBindings = 0
+let candidateBindings = 0
 const observer = module.registerHooks({
   /**
    * @param {string} specifier
@@ -73,7 +73,7 @@ const observer = module.registerHooks({
    * @param {(specifier: string, context?: Partial<import('node:module').ResolveHookContext>) => import('node:module').ResolveFnOutput} nextResolve
    */
   resolve (specifier, context, nextResolve) {
-    if (specifier === `${roots[0]}?iitm=bindings`) unrelatedBindings++
+    if (specifier === `${roots[0]}?iitm=bindings`) candidateBindings++
     return nextResolve(specifier, context)
   }
 })
@@ -81,7 +81,7 @@ try {
   strictEqual((await import(previous)).previous, 1)
   strictEqual((await import(roots[0])).value, 52)
   strictEqual((await import(roots[1])).value, 62)
-  strictEqual(unrelatedBindings, 0)
+  strictEqual(candidateBindings, 1)
   strictEqual(calls, 2)
   strictEqual(terminalResolutions, 2)
 } finally {
