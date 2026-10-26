@@ -44,6 +44,7 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
  * @typedef {object} ProcessResult
  * @property {string[] | Map<string, string | StarBinding>} bindings
  * @property {Map<string, string> | undefined} origins
+ * @property {string | undefined} format
  */
 
 /** @param {string} url The module URL or specifier. */
@@ -213,13 +214,13 @@ function shouldExcludeExport (name, sourceUrl) {
  * for a module with no `export *`.
  */
 function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen }) {
-  const { exportNames, starReexports } = yield * getModuleExports(srcUrl, context)
+  const { exportNames, starReexports, format } = yield * getModuleExports(srcUrl, context)
 
   // Most modules have no export star. Keep that path array-backed so it pays
   // neither merge bookkeeping nor a Map lookup for each direct export.
   if (starReexports === undefined) {
     if (!excludeDefault) {
-      return { bindings: exportNames, origins: undefined }
+      return { bindings: exportNames, origins: undefined, format }
     }
 
     const bindings = []
@@ -227,7 +228,7 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
       if (shouldExcludeExport(name, srcUrl)) continue
       bindings.push(name)
     }
-    return { bindings, origins: undefined }
+    return { bindings, origins: undefined, format }
   }
 
   const bindings = new Map()
@@ -326,7 +327,7 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
     }
   }
 
-  return { bindings, origins: starOrigins }
+  return { bindings, origins: starOrigins, format }
 }
 
 /**
@@ -617,8 +618,9 @@ export function createHook (meta) {
    * @param {string} realUrl The URL of the wrapped module.
    * @param {string[] | Map<string, string | StarBinding>} bindings Its exported bindings.
    * @param {string} originalSpecifier The specifier used to import the module.
+   * @param {string | undefined} format The wrapped module's loader format.
    */
-  function buildWrapperSource (realUrl, bindings, originalSpecifier) {
+  function buildWrapperSource (realUrl, bindings, originalSpecifier, format) {
     // The wrapped module imports its namespace as `namespace`, which serves
     // every export but the ones a same-origin `export *` collision forced onto
     // their defining module (#171): the aggregate namespace drops those as
@@ -686,7 +688,7 @@ ${reexports}
 
 __binder.flush()
 
-register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifier)})
+register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifier)}, ${JSON.stringify(format)})
 `
   }
 
@@ -694,17 +696,16 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
    * Finalizes a successful wrap and builds its module source.
    *
    * @param {string} realUrl The URL of the wrapped module.
-   * @param {LoadContext} context Its loader context.
+   * @param {string | undefined} format The wrapped module's loader format.
    * @param {string} originalSpecifier The original import specifier.
    * @param {string[] | Map<string, string | StarBinding>} bindings Its exported bindings.
    */
-  function onWrapSuccess (realUrl, context, originalSpecifier, bindings) {
+  function onWrapSuccess (realUrl, format, originalSpecifier, bindings) {
     specifiers.delete(realUrl)
-    // context.format is set to 'commonjs' by getCjsExports during processModule.
-    if (context.format === 'commonjs') {
+    if (format === 'commonjs') {
       cjsInIitmChain.add(realUrl)
     }
-    return buildWrapperSource(realUrl, bindings, originalSpecifier)
+    return buildWrapperSource(realUrl, bindings, originalSpecifier, format)
   }
 
   // Bookkeeping shared by the async and sync wrap paths when `processModule`
@@ -744,11 +745,11 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
     }
 
     try {
-      const { bindings } = await driveAsync(
+      const { bindings, format } = await driveAsync(
         processModule({ srcUrl: realUrl, context: processContext }),
         { resolve: cachedResolve, load: parentGetSource }
       )
-      return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
+      return { source: onWrapSuccess(realUrl, format, originalSpecifier, bindings) }
     } catch (cause) {
       onWrapFailure(realUrl, cause)
       // Revert back to the non-iitm URL
@@ -782,11 +783,11 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
     }
 
     try {
-      const { bindings } = driveSync(
+      const { bindings, format } = driveSync(
         processModule({ srcUrl: realUrl, context: processContext }),
         { resolve: cachedResolve, load: nextLoad }
       )
-      return { source: onWrapSuccess(realUrl, processContext, originalSpecifier, bindings) }
+      return { source: onWrapSuccess(realUrl, format, originalSpecifier, bindings) }
     } catch (cause) {
       onWrapFailure(realUrl, cause)
       url = realUrl

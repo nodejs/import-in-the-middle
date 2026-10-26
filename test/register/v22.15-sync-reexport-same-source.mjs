@@ -18,9 +18,10 @@ let moduleExportsUndefinedStarExports
 let ambiguousRepeatedExports
 let ambiguousThirdExports
 let cjsReexportEsmStarExports
+let cjsReexportEsmStarFormat
 
 // eslint-disable-next-line no-new
-new Hook((exports, name) => {
+new Hook((exports, name, baseDir, format) => {
   if (typeof name === 'string' && name.includes('reexport-same-source.mjs')) {
     sawSameSource = true
     strictEqual(exports.val, 1)
@@ -52,6 +53,7 @@ new Hook((exports, name) => {
   }
   if (typeof name === 'string' && name.includes('cjs-reexport-esm-star.js')) {
     cjsReexportEsmStarExports = exports
+    cjsReexportEsmStarFormat = format
   }
 })
 
@@ -91,4 +93,5 @@ if (parseInt(process.versions.node, 10) >= 23) {
 }
 strictEqual(cjsReexportEsmStar.nested, 42)
 strictEqual(cjsReexportEsmStarExports?.nested, 42)
+strictEqual(cjsReexportEsmStarFormat, 'commonjs')
 strictEqual(repeated.foo, 'hooked')

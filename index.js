@@ -32,9 +32,10 @@ function isPackageSpecifier (specifier, baseDir) {
   return hashSeparator !== -1 && baseDir.endsWith(specifier.slice(0, hashSeparator))
 }
 
+/** @param {import('./index').HookFunction} hook */
 function addHook (hook) {
   importHooks.push(hook)
-  toHook.forEach(([name, namespace, specifier]) => hook(name, namespace, specifier))
+  toHook.forEach(([name, namespace, specifier, format]) => hook(name, namespace, specifier, format))
 }
 
 function removeHook (hook) {
@@ -44,8 +45,15 @@ function removeHook (hook) {
   }
 }
 
-function callHookFn (hookFn, namespace, name, baseDir) {
-  const newDefault = hookFn(namespace, name, baseDir)
+/**
+ * @param {import('./index').HookFn} hookFn
+ * @param {import('./index').Namespace} namespace
+ * @param {string} name
+ * @param {string | undefined} baseDir
+ * @param {string | undefined} format
+ */
+function callHookFn (hookFn, namespace, name, baseDir, format) {
+  const newDefault = hookFn(namespace, name, baseDir, format)
   if (newDefault && newDefault !== namespace) {
     // Only ESM modules that actually export `default` can have it reassigned.
     // Some hooks return a value unconditionally; avoid crashing when the module
@@ -141,7 +149,13 @@ function Hook (modules, options, hookFn) {
     sendModulesToLoader(modules)
   }
 
-  this._iitmHook = (name, namespace, specifier) => {
+  /**
+   * @param {string} name
+   * @param {import('./index').Namespace} namespace
+   * @param {string} specifier
+   * @param {string | undefined} format
+   */
+  this._iitmHook = (name, namespace, specifier, format) => {
     const loadUrl = name
     const isNodeUrl = loadUrl.startsWith('node:')
     let filePath, baseDir
@@ -176,28 +190,28 @@ function Hook (modules, options, hookFn) {
       for (const matchArg of modules) {
         if (filePath && matchArg === filePath) {
           // abspath match
-          callHookFn(hookFn, namespace, filePath, undefined)
+          callHookFn(hookFn, namespace, filePath, undefined, format)
         } else if (matchArg === name) {
           if (!baseDir) {
             // built-in module (or unexpected non file:// name?)
-            callHookFn(hookFn, namespace, name, baseDir)
+            callHookFn(hookFn, namespace, name, baseDir, format)
           } else if (isPackageSpecifier(specifiers.get(loadUrl), baseDir)) {
             // An import of the top-level module (e.g. `import 'ioredis'`).
             // Note: Slight behaviour difference from RITM. RITM uses
             // `require.resolve(name)` to see if filename is the module
             // main file, which will catch `require('ioredis/built/index.js')`.
             // The check here will not catch `import 'ioredis/built/index.js'`.
-            callHookFn(hookFn, namespace, name, baseDir)
+            callHookFn(hookFn, namespace, name, baseDir, format)
           } else if (internals) {
             const internalPath = name + path.sep + path.relative(baseDir, filePath)
-            callHookFn(hookFn, namespace, internalPath, baseDir)
+            callHookFn(hookFn, namespace, internalPath, baseDir, format)
           }
         } else if (matchArg === specifier) {
-          callHookFn(hookFn, namespace, specifier, baseDir)
+          callHookFn(hookFn, namespace, specifier, baseDir, format)
         }
       }
     } else {
-      callHookFn(hookFn, namespace, name, baseDir)
+      callHookFn(hookFn, namespace, name, baseDir, format)
     }
   }
 
