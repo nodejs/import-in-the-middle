@@ -4,8 +4,8 @@
 
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
-import { builtinModules } from 'module'
-import { isAbsolute } from 'path'
+import { builtinModules, createRequire } from 'module'
+import { isAbsolute } from 'node:path'
 import { getModuleExports } from './lib/get-exports.mjs'
 import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
@@ -33,6 +33,10 @@ const HANDLED_FORMATS = new Set([
   'builtin', 'module', 'commonjs', 'module-typescript', 'commonjs-typescript'
 ])
 const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
+const NODE_MODULES_PATH = '/node_modules/'
+const TURBOPACK_HASH_RE = /-[a-f0-9]{16}(?:\/|$)/
+/** @type {typeof import('module-details-from-path') | undefined} */
+let moduleDetailsFromPath
 
 /** @typedef {import('node:module').LoadHookContext} LoadContext */
 /** @typedef {import('node:module').ResolveHookContext} ResolveContext */
@@ -40,12 +44,38 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
 /** @typedef {string | { specifier: string, format: 'module-typescript' | 'commonjs-typescript' }} SpecifierData */
 /** @typedef {{ name: string, origin: string }} StarBinding */
+/** @typedef {Omit<import('./lib/register.js').HookCapability, 'id'> & { id?: number }} HookCapability */
+/**
+ * @typedef {object} RegisteredHookCapability
+ * @property {number | undefined} id
+ * @property {string[] | undefined} modules
+ * @property {boolean} internals
+ * @property {boolean} paths
+ */
+/** @typedef {import('./lib/register.js').HookCapabilityRemoval} HookCapabilityRemoval */
 /**
  * @typedef {object} ProcessResult
  * @property {string[] | Map<string, string | StarBinding>} bindings
  * @property {Map<string, string> | undefined} origins
  * @property {string | undefined} format
  */
+
+/**
+ * @param {string} specifier
+ * @param {string} url
+ */
+function getTurbopackSpecifier (specifier, url) {
+  const nodeModulesIndex = url.lastIndexOf(NODE_MODULES_PATH)
+  if (nodeModulesIndex === -1) return
+  const packageStart = nodeModulesIndex + NODE_MODULES_PATH.length
+  let packageEnd = url.indexOf('/', packageStart)
+  if (url[packageStart] === '@') packageEnd = url.indexOf('/', packageEnd + 1)
+  if (packageEnd === -1) packageEnd = url.length
+
+  const name = url.slice(packageStart, packageEnd)
+  if (specifier.startsWith(name) && specifier[name.length] === '-' &&
+    specifier.lastIndexOf('-') === name.length) return name
+}
 
 /** @param {string} url The module URL or specifier. */
 function parseIitm (url) {
@@ -69,6 +99,19 @@ function deleteIitm (parsedURL) {
   return resultUrl.startsWith('file:///node:')
     ? resultUrl.slice('file:///'.length)
     : resultUrl
+}
+
+/** @param {string} url */
+function getFilePath (url) {
+  if (!url.startsWith('file:')) return
+  let resultPath
+  const stackTraceLimit = Error.stackTraceLimit
+  Error.stackTraceLimit = 0
+  try {
+    resultPath = fileURLToPath(url)
+  } catch {}
+  Error.stackTraceLimit = stackTraceLimit
+  return resultPath
 }
 
 function isBareSpecifier (specifier) {
@@ -355,6 +398,7 @@ export function createHook (meta) {
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   const createHookURL = meta.url.replace('hook.mjs', 'create-hook.mjs')
   let includeModules, excludeModules
+  let includeHookCapabilities = false
   let shouldInclude = defaultShouldInclude
   let disableCjsSourceStripping = false
 
@@ -365,6 +409,91 @@ export function createHook (meta) {
   // of the native CJS module value (e.g. EventEmitter constructor), breaking
   // patterns like `class App extends require('events') {}`.
   const cjsInIitmChain = new Set()
+  /** @type {RegisteredHookCapability[] | undefined} */
+  let registeredHookCapabilities
+  let hasInternalHookCapabilities = false
+
+  /**
+   * @param {HookCapability} capability
+   */
+  function registerHookCapability (capability) {
+    let modules
+    if (capability.modules !== undefined) {
+      modules = capability.modules.slice()
+      for (const each of capability.modules) {
+        if (!each.startsWith('node:') && builtinModules.includes(each)) {
+          modules.push(`node:${each}`)
+        }
+      }
+    }
+
+    const internals = capability.internals === true
+    if (internals && modules !== undefined) hasInternalHookCapabilities = true
+    registeredHookCapabilities ??= []
+    const paths = modules?.some(isAbsolute) === true
+    registeredHookCapabilities.push({ id: capability.id, modules, internals, paths })
+  }
+
+  /**
+   * @param {number} id
+   */
+  function removeHookCapability (id) {
+    for (let i = 0; i < registeredHookCapabilities.length; i++) {
+      if (registeredHookCapabilities[i].id === id) {
+        registeredHookCapabilities.splice(i, 1)
+        break
+      }
+    }
+    hasInternalHookCapabilities = false
+    for (const capability of registeredHookCapabilities) {
+      if (capability.internals && capability.modules !== undefined) hasInternalHookCapabilities = true
+    }
+  }
+
+  /**
+   * @param {HookCapability | HookCapabilityRemoval} update
+   */
+  function applyHookCapabilityUpdate (update) {
+    if ('removed' in update) {
+      removeHookCapability(update.id)
+      return
+    }
+    registerHookCapability(update)
+  }
+
+  /**
+   * @param {string} url
+   * @param {string} specifier
+   */
+  function matchesAnyHookCapability (url, specifier) {
+    if (registeredHookCapabilities === undefined || registeredHookCapabilities.length === 0) return false
+    let resultPath, packageName
+    let parsedPath = false
+    for (const { modules, internals, paths } of registeredHookCapabilities) {
+      if (modules === undefined || modules.includes(specifier) || modules.includes(url)) return true
+      if (!internals && !paths) continue
+
+      if (!parsedPath) {
+        resultPath = getFilePath(url)
+        parsedPath = true
+        if (hasInternalHookCapabilities && resultPath !== undefined) {
+          packageName = (moduleDetailsFromPath ??= createRequire(import.meta.url)('module-details-from-path'))(resultPath)?.name
+        }
+      }
+      if ((paths && resultPath !== undefined && modules.includes(resultPath)) ||
+        (internals && packageName !== undefined && modules.includes(packageName))) return true
+    }
+
+    if (specifier.length < 17 || !specifier.includes('-')) return false
+    const turbopackSpecifier = getTurbopackSpecifier(specifier, url)
+    if (turbopackSpecifier !== undefined) {
+      for (const { modules } of registeredHookCapabilities) {
+        // The loader worker cannot observe Next's later TURBOPACK environment update.
+        if (modules.includes(turbopackSpecifier)) return TURBOPACK_HASH_RE.test(specifier)
+      }
+    }
+    return false
+  }
 
   // Default matcher, used unless the consumer supplies its own `shouldInclude`
   // (see applyOptions). It applies the include/exclude lists, so finishResolve
@@ -375,35 +504,22 @@ export function createHook (meta) {
   // paths would be error prone). An absolute path entry added via Hook over the
   // message port matches the resolved file path, so it is resolved here.
   /**
-   * @param {string} url The resolved module URL.
-   * @param {string} specifier The original import specifier.
+   * @param {string} url
+   * @param {string} specifier
    */
   function defaultShouldInclude (url, specifier) {
     if (includeModules === undefined && excludeModules === undefined) return true
 
-    let resultPath
     /** @param {string | RegExp} each The module filter. */
     function match (each) {
-      if (each instanceof RegExp) return each.test(url)
-      if (each === specifier || each === url) return true
-      if (!isAbsolute(each)) return false
-
-      if (resultPath === undefined) {
-        resultPath = ''
-        if (url.startsWith('file:')) {
-          const stackTraceLimit = Error.stackTraceLimit
-          Error.stackTraceLimit = 0
-          try {
-            resultPath = fileURLToPath(url)
-          } catch {}
-          Error.stackTraceLimit = stackTraceLimit
-        }
-      }
-      return each === resultPath
+      return each instanceof RegExp ? each.test(url) : each === specifier || each === url
     }
 
-    return (includeModules === undefined || includeModules.some(match)) &&
-      (excludeModules === undefined || !excludeModules.some(match))
+    if (includeModules !== undefined && !includeModules.some(match)) {
+      if (!includeHookCapabilities) return false
+      if (!matchesAnyHookCapability(url, specifier)) return false
+    }
+    return excludeModules === undefined || !excludeModules.some(match)
   }
 
   // Applies the include/exclude/message-port configuration. Shared by the
@@ -427,18 +543,13 @@ export function createHook (meta) {
     }
 
     if (data.addHookMessagePort) {
-      data.addHookMessagePort.on('message', (modules) => {
-        if (includeModules === undefined) {
-          includeModules = []
-        }
-
-        for (const each of modules) {
-          if (!each.startsWith('node:') && builtinModules.includes(each)) {
-            includeModules.push(`node:${each}`)
-          }
-
-          includeModules.push(each)
-        }
+      includeHookCapabilities = true
+      data.addHookMessagePort.on('message', (message) => {
+        includeModules ??= []
+        const update = Array.isArray(message)
+          ? { modules: message, internals: false }
+          : message
+        applyHookCapabilityUpdate(update)
 
         data.addHookMessagePort.postMessage('ack')
       }).unref()
@@ -498,9 +609,8 @@ export function createHook (meta) {
       return result
     }
 
-    // `shouldInclude` is always set (the include/exclude list matcher by default,
-    // a consumer-provided predicate otherwise), so no nullish check is needed.
-    if (!shouldInclude(result.url, specifier)) {
+    const included = shouldInclude(result.url, specifier)
+    if (!included) {
       return result
     }
 

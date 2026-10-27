@@ -38,6 +38,32 @@ to `addHook` callbacks, after the original import specifier. Hooks registered af
 an import receive the same format during replay. Older generated wrappers provide
 `undefined`, so consumers must handle missing format metadata.
 
+### Package internals
+
+`Hook(['package-name'], callback)` normally runs for imports of the package entry
+point. Set `internals: true` to also run for imported files inside that package:
+
+```js
+Hook(['package-name'], { internals: true }, (exported, name, baseDir) => {
+  // For an internal file, name is package-name/path/to/file.js.
+  // baseDir is the absolute path of the package directory.
+})
+```
+
+The internal path uses the platform path separator. The package name keeps its
+import spelling. You can also hook a specific package subpath or absolute file
+path without enabling `internals`.
+Omitting the module list runs the callback for every intercepted module.
+
+`internals` is a Hook option. It does not select which modules the loader wraps.
+The loader wraps broadly by default so hooks can run after modules have loaded.
+Its `include`, `exclude`, and `shouldInclude` options make that selection instead.
+An internal-file callback requires its file to be intercepted. Exact package-name
+`include` filters do not include the package's entire file tree. Use a matching
+URL pattern or `shouldInclude` predicate to include internal files.
+The hooked-module message channel includes internal files for hooks with
+`internals: true`.
+
 This requires the use of an ESM loader hook, which can be added with the following
 command-line option.
 
@@ -67,7 +93,9 @@ of modules, file URLs or regular expressions to either `exclude` or specifically
 `include` which modules are intercepted. This is useful if a module is not
 compatible with the loader hook.
 
-> **Note:** This feature is incompatible with the `{internals: true}` Hook option
+A package-name filter matches that import name, rather than every file inside
+the package. To retain internal-file callbacks, select the required file URLs
+or use a regular expression that includes them.
 
 ```js
 import * as module from 'module'
@@ -85,11 +113,14 @@ module.register('import-in-the-middle/hook.mjs', import.meta.url, {
 
 ### Only Intercepting Hooked modules
 
-> **Note:** This feature is experimental and is incompatible with the `{internals: true}` Hook option
+> **Note:** This feature is experimental.
 
 If you are `Hook`'ing all modules before they are imported, for example in a
 module loaded via the Node.js `--import` CLI argument, you can configure the
-loader to intercept only modules that were specifically hooked.
+loader to intercept only modules that were specifically hooked. This avoids
+export parsing and wrapper generation for unrelated modules. Hooks must be
+registered before import, because a module loaded without a wrapper cannot be
+hooked afterward.
 
 `instrument.mjs`
 
