@@ -5,6 +5,7 @@
 import { URL, fileURLToPath } from 'url'
 import { inspect } from 'util'
 import { builtinModules, createRequire } from 'module'
+import { isAbsolute } from 'node:path'
 import { getModuleExports } from './lib/get-exports.mjs'
 import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
@@ -49,6 +50,7 @@ let moduleDetailsFromPath
  * @property {number | undefined} id
  * @property {string[] | undefined} modules
  * @property {boolean} internals
+ * @property {boolean} paths
  */
 /** @typedef {import('./lib/register.js').HookCapabilityRemoval} HookCapabilityRemoval */
 /**
@@ -61,20 +63,18 @@ let moduleDetailsFromPath
 /**
  * @param {string} specifier
  * @param {string} url
- * @returns {string | undefined}
  */
 function getTurbopackSpecifier (specifier, url) {
-  // The loader worker cannot observe Next's later TURBOPACK environment update.
-  if (!TURBOPACK_HASH_RE.test(specifier)) return
-  const result = specifier.slice(0, specifier.lastIndexOf('-'))
-
   const nodeModulesIndex = url.lastIndexOf(NODE_MODULES_PATH)
   if (nodeModulesIndex === -1) return
   const packageStart = nodeModulesIndex + NODE_MODULES_PATH.length
   let packageEnd = url.indexOf('/', packageStart)
   if (url[packageStart] === '@') packageEnd = url.indexOf('/', packageEnd + 1)
   if (packageEnd === -1) packageEnd = url.length
-  if (url.slice(packageStart, packageEnd) === result) return result
+
+  const name = url.slice(packageStart, packageEnd)
+  if (specifier.startsWith(name) && specifier[name.length] === '-' &&
+    specifier.lastIndexOf('-') === name.length) return name
 }
 
 /** @param {string} url The module URL or specifier. */
@@ -430,7 +430,8 @@ export function createHook (meta) {
     const internals = capability.internals === true
     if (internals && modules !== undefined) hasInternalHookCapabilities = true
     registeredHookCapabilities ??= []
-    registeredHookCapabilities.push({ id: capability.id, modules, internals })
+    const paths = modules?.some(isAbsolute) === true
+    registeredHookCapabilities.push({ id: capability.id, modules, internals, paths })
   }
 
   /**
@@ -461,36 +462,34 @@ export function createHook (meta) {
   }
 
   /**
-   * @param {RegisteredHookCapability} capability
    * @param {string} url
    * @param {string} specifier
-   * @param {string | undefined} resultPath
-   * @param {string | undefined} packageName
-   * @returns {boolean}
    */
-  function matchesHookCapability (capability, url, specifier, resultPath, packageName) {
-    const { modules } = capability
-    if (modules === undefined || modules.includes(specifier) || modules.includes(url)) return true
-    return (resultPath !== undefined && modules.includes(resultPath)) ||
-      (capability.internals && packageName !== undefined && modules.includes(packageName))
-  }
-
-  /**
-   * @param {string} url
-   * @param {string} specifier
-   * @param {string | undefined} resultPath
-   * @param {string | undefined} packageName
-   * @returns {boolean}
-   */
-  function matchesAnyHookCapability (url, specifier, resultPath, packageName) {
+  function matchesAnyHookCapability (url, specifier) {
     if (registeredHookCapabilities === undefined || registeredHookCapabilities.length === 0) return false
-    for (const capability of registeredHookCapabilities) {
-      if (matchesHookCapability(capability, url, specifier, resultPath, packageName)) return true
+    let resultPath, packageName
+    let parsedPath = false
+    for (const { modules, internals, paths } of registeredHookCapabilities) {
+      if (modules === undefined || modules.includes(specifier) || modules.includes(url)) return true
+      if (!internals && !paths) continue
+
+      if (!parsedPath) {
+        resultPath = getFilePath(url)
+        parsedPath = true
+        if (hasInternalHookCapabilities && resultPath !== undefined) {
+          packageName = (moduleDetailsFromPath ??= createRequire(import.meta.url)('module-details-from-path'))(resultPath)?.name
+        }
+      }
+      if ((paths && resultPath !== undefined && modules.includes(resultPath)) ||
+        (internals && packageName !== undefined && modules.includes(packageName))) return true
     }
+
+    if (specifier.length < 17 || !specifier.includes('-')) return false
     const turbopackSpecifier = getTurbopackSpecifier(specifier, url)
     if (turbopackSpecifier !== undefined) {
-      for (const capability of registeredHookCapabilities) {
-        if (capability.modules.includes(turbopackSpecifier)) return true
+      for (const { modules } of registeredHookCapabilities) {
+        // The loader worker cannot observe Next's later TURBOPACK environment update.
+        if (modules.includes(turbopackSpecifier)) return TURBOPACK_HASH_RE.test(specifier)
       }
     }
     return false
@@ -507,10 +506,8 @@ export function createHook (meta) {
   /**
    * @param {string} url
    * @param {string} specifier
-   * @param {string | undefined} resultPath
-   * @param {string | undefined} packageName
    */
-  function defaultShouldInclude (url, specifier, resultPath, packageName) {
+  function defaultShouldInclude (url, specifier) {
     if (includeModules === undefined && excludeModules === undefined) return true
 
     /** @param {string | RegExp} each The module filter. */
@@ -520,8 +517,7 @@ export function createHook (meta) {
 
     if (includeModules !== undefined && !includeModules.some(match)) {
       if (!includeHookCapabilities) return false
-      resultPath ??= getFilePath(url)
-      if (!matchesAnyHookCapability(url, specifier, resultPath, packageName)) return false
+      if (!matchesAnyHookCapability(url, specifier)) return false
     }
     return excludeModules === undefined || !excludeModules.some(match)
   }
@@ -613,16 +609,7 @@ export function createHook (meta) {
       return result
     }
 
-    const resultPath = includeHookCapabilities && hasInternalHookCapabilities
-      ? getFilePath(result.url)
-      : undefined
-    const packageName = hasInternalHookCapabilities && includeHookCapabilities &&
-      resultPath !== undefined
-      ? (moduleDetailsFromPath ??= createRequire(import.meta.url)('module-details-from-path'))(resultPath)?.name
-      : undefined
-    const included = shouldInclude === defaultShouldInclude
-      ? defaultShouldInclude(result.url, specifier, resultPath, packageName)
-      : shouldInclude(result.url, specifier)
+    const included = shouldInclude(result.url, specifier)
     if (!included) {
       return result
     }

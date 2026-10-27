@@ -110,3 +110,34 @@ strictEqual(localNamespace.value, 42)
 local.unhook()
 absolute.unhook()
 await waitForAllMessagesAcknowledged()
+
+let hyphenatedCalls = 0
+const hyphenated = new Hook(['hyphenated-package'],
+  /** @param {import('../../index.js').Namespace} namespace */
+  namespace => {
+    hyphenatedCalls++
+    namespace.value = 42
+  })
+await waitForAllMessagesAcknowledged()
+
+for (const specifier of [
+  'hyphenated-packages-0123456789abcdef',
+  'hyphenated-package-0123456789abcde',
+  'hyphenated-package-0123456789abcdef0',
+  'hyphenated-package-0123456789abcdeg',
+  'hyphenated-package-extra-0123456789abcdef',
+  'hyphenated-package-0123456789abcdef/wrong-package'
+]) {
+  const namespace = await import(specifier)
+  strictEqual(hyphenatedCalls, 0)
+  namespace.update()
+  strictEqual(namespace.value, 2)
+}
+
+const hyphenatedNamespace = await import('hyphenated-package-0123456789abcdef')
+strictEqual(hyphenatedNamespace.value, 42)
+hyphenatedNamespace.update()
+strictEqual(hyphenatedNamespace.value, 42)
+strictEqual(hyphenatedCalls, 1)
+hyphenated.unhook()
+await waitForAllMessagesAcknowledged()
