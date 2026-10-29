@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.6.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.5.3...import-in-the-middle-v3.6.0) (2026-10-29)
+
+
+### Features
+
+* **hooks:** expose module format to callbacks ([#308](https://github.com/nodejs/import-in-the-middle/issues/308)) ([48222b0](https://github.com/nodejs/import-in-the-middle/commit/48222b03f40f11c769154563c23ee3cd88713972))
+
+
+### Bug Fixes
+
+* **types:** resolve synchronous hook declarations ([#311](https://github.com/nodejs/import-in-the-middle/issues/311)) ([581f9ee](https://github.com/nodejs/import-in-the-middle/commit/581f9ee436fc38743fc301523020c064baaca798))
+
 ## [3.5.3](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.5.2...import-in-the-middle-v3.5.3) (2026-10-22)
 
 
