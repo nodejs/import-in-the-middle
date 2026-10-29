@@ -276,5 +276,5 @@ On Node.js versions where type stripping is not enabled by default, run with
   load. Idempotent transforms (type stripping, AST instrumentation, minifiers)
   are unaffected, and the actual module still executes the source its real load
   returns.
-* With synchronous hooks, a module's static imports and their resolved URLs
-  must remain stable. The cycle detector caches import metadata by module URL.
+* A module's static imports and their resolved URLs must remain stable.
+  The cycle detector caches import metadata by module URL.

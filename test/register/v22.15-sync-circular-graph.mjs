@@ -17,6 +17,8 @@ const terminal = `${prefix}terminal.mjs`
 const previous = `${prefix}previous.mjs`
 const unrelated = `${prefix}unrelated.mjs`
 const loop = `${prefix}loop.mjs`
+const cyclicRoots = [`${prefix}cyclic-a.mjs`, `${prefix}cyclic-b.mjs`]
+const cyclicShared = `${prefix}cyclic-shared.mjs`
 const sources = new Map([
   [previous, `export * from '${prefix}previous-leaf.mjs'`],
   [`${prefix}previous-leaf.mjs`, `import '${unrelated}'; export const previous = 1`],
@@ -26,8 +28,28 @@ const sources = new Map([
   [roots[1], `export * from '${prefix}leaf-b.mjs'`],
   [`${prefix}leaf-a.mjs`, `import { value } from '${shared}'; export { value }`],
   [`${prefix}leaf-b.mjs`, `import { value } from '${shared}'; export { value }`],
-  [shared, 'import { value } from "#terminal"; export { value }'],
-  [terminal, 'export const value = 42']
+  [shared, `import { value } from "#terminal"; import '${prefix}closed-a.mjs'; export { value }`],
+  [terminal, 'export const value = 42'],
+  [`${prefix}closed-a.mjs`, `import '${prefix}closed-b.mjs'; export const value = 1`],
+  [`${prefix}closed-b.mjs`, `import '${prefix}closed-a.mjs'; export const value = 2`],
+  [cyclicRoots[0], `export * from '${prefix}cyclic-leaf-a.mjs'`],
+  [cyclicRoots[1], `export * from '${prefix}cyclic-leaf-b.mjs'`],
+  [`${prefix}cyclic-leaf-a.mjs`, `
+    import '${cyclicShared}'
+    export function BaseA () {}
+    export const value = 1
+  `],
+  [`${prefix}cyclic-leaf-b.mjs`, `
+    import '${cyclicShared}'
+    export function BaseB () {}
+    export const value = 2
+  `],
+  [cyclicShared, `
+    import { BaseA, value as first } from '${cyclicRoots[0]}'
+    import { BaseB, value as second } from '${cyclicRoots[1]}'
+    export const bases = () => [BaseA, BaseB]
+    export const read = () => [first, second]
+  `]
 ])
 let terminalResolutions = 0
 const upstream = module.registerHooks({
@@ -62,10 +84,12 @@ const hook = new Hook(/**
     if (name.endsWith('/root-a.mjs') || name.endsWith('/root-b.mjs')) {
       calls++
       exports.value += 10 * calls
+    } else if (name.endsWith('/cyclic-a.mjs') || name.endsWith('/cyclic-b.mjs')) {
+      exports.value *= 100
     }
   })
 register()
-let candidateBindings = 0
+let bindingRequests = 0
 const observer = module.registerHooks({
   /**
    * @param {string} specifier
@@ -73,17 +97,27 @@ const observer = module.registerHooks({
    * @param {(specifier: string, context?: Partial<import('node:module').ResolveHookContext>) => import('node:module').ResolveFnOutput} nextResolve
    */
   resolve (specifier, context, nextResolve) {
-    if (specifier === `${roots[0]}?iitm=bindings`) candidateBindings++
+    if (specifier.startsWith(prefix) && specifier.includes('?iitm=bindings')) bindingRequests++
     return nextResolve(specifier, context)
   }
 })
 try {
-  strictEqual((await import(previous)).previous, 1)
-  strictEqual((await import(roots[0])).value, 52)
-  strictEqual((await import(roots[1])).value, 62)
-  strictEqual(candidateBindings, 1)
+  const previousExports = await import(previous)
+  const first = await import(roots[0])
+  const second = await import(roots[1])
+  strictEqual(bindingRequests, 0, 'Acyclic barrels must not request cycle binding modules')
+  strictEqual(previousExports.previous, 1)
+  strictEqual(first.value, 52)
+  strictEqual(second.value, 62)
   strictEqual(calls, 2)
   strictEqual(terminalResolutions, 2)
+  const cyclicFirst = await import(cyclicRoots[0])
+  const cyclicSecond = await import(cyclicRoots[1])
+  const { bases, read } = await import(cyclicShared)
+  strictEqual(read()[0], 100)
+  strictEqual(read()[1], 200)
+  strictEqual(bases()[0], cyclicFirst.BaseA)
+  strictEqual(bases()[1], cyclicSecond.BaseB)
 } finally {
   hook.unhook()
   observer.deregister()

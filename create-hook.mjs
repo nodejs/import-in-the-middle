@@ -24,8 +24,6 @@ const isWin = process.platform === 'win32'
 // cycle would otherwise hit. Below it the recursion pays only an integer
 // compare per level and allocates no set.
 const STAR_CYCLE_DEPTH = 100
-const NATIVE_VISITED = 1
-const NATIVE_STAGED = 2
 
 // FIXME: Typescript extensions are added temporarily until we find a better
 // way of supporting arbitrary extensions
@@ -43,13 +41,15 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
 /** @typedef {import('node:module').LoadFnOutput} LoadResult */
 /** @typedef {string | { specifier: string, format: 'module-typescript' | 'commonjs-typescript' }} SpecifierData */
 /** @typedef {{ name: string, origin: string }} StarBinding */
+/** @typedef {{ url: string, format?: string, importAttributes: Record<string, string>, graph?: ModuleImportGraph }} ModuleImportTarget */
+/** @typedef {{ targets: ModuleImportTarget[], acyclic: boolean }} ModuleImportGraph */
+/** @typedef {(url: string, context: LoadContext) => Generator<Array, ModuleImportGraph>} ResolveImports */
 /**
  * @typedef {object} ProcessResult
  * @property {string[] | Map<string, string | StarBinding>} bindings
  * @property {Map<string, string> | undefined} origins
  * @property {string | undefined} format
  * @property {Set<string> | undefined} [cyclicImports]
- * @property {boolean} [staged]
  */
 /**
  * @typedef {object} CycleState
@@ -208,6 +208,7 @@ function shouldExcludeExport (name, sourceUrl) {
  * @param {object} params
  * @param {string} params.srcUrl The full URL to the module to process.
  * @param {LoadContext} params.context Provided by the loaders API.
+ * @param {ResolveImports} params.resolveImports The cached static-import resolver.
  * @param {boolean} [params.excludeDefault = false] Exclude the default export.
  * @param {number} [params.depth = 0] Star-re-export recursion depth. Used to
  * detect `export *` cycles (`a` re-exports `b`, `b` re-exports `a`) cheaply:
@@ -218,17 +219,15 @@ function shouldExcludeExport (name, sourceUrl) {
  * before descending into its subtree and removed once that subtree finishes, so
  * it tracks the active path rather than every URL ever visited.
  * @param {CycleState} [params.cycleState] The wrapper root and detected cycle edges.
- * @param {boolean} [params.stageCycles] Detect cycles when native dependencies load.
- * @param {boolean} [params.collectModuleImports] Collect requests already needed by native traversal.
  * @returns {Generator<Array, ProcessResult>}
  * A generator that yields I/O operations and ultimately returns the shimmed
  * bindings for all the exports from the module and any transitive export all
  * modules. `origins` (the defining module per `*`-sourced name) is `undefined`
  * for a module with no `export *`.
  */
-function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, seen, cycleState, stageCycles, collectModuleImports = false }) {
+function * processModule ({ srcUrl, context, resolveImports, excludeDefault = false, depth = 0, seen, cycleState }) {
   let isCycleRoot = false
-  const moduleExports = yield * getModuleExports(srcUrl, context, cycleState !== undefined || collectModuleImports)
+  const moduleExports = yield * getModuleExports(srcUrl, context, cycleState !== undefined)
   const { exportNames, starReexports, format } = moduleExports
 
   if (cycleState !== undefined && moduleExports.hasModuleImports) {
@@ -317,6 +316,7 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
       const sub = yield * processModule({
         srcUrl: result.url,
         context: { ...context, format: result.format },
+        resolveImports,
         excludeDefault: true,
         depth: depth + 1,
         seen,
@@ -354,12 +354,11 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
   }
 
   if (isCycleRoot && cycleState.imports !== undefined) {
-    if (stageCycles) return { bindings, origins: starOrigins, cyclicImports: cycleState.imports, staged: true }
     const candidates = cycleState.imports
     cycleState.imports = undefined
     const seenImports = new Set()
     for (const candidate of candidates) {
-      yield * findCyclicImports(candidate, context, cycleState, seenImports)
+      yield * findCyclicImports(candidate, context, cycleState, seenImports, resolveImports)
     }
   }
 
@@ -372,25 +371,33 @@ function * processModule ({ srcUrl, context, excludeDefault = false, depth = 0, 
  * @param {string} url The module whose static requests can close the cycle.
  * @param {LoadContext} context The metadata load context.
  * @param {CycleState} cycleState The wrapper root and its closing importers.
- * @param {Set<string> | undefined} seen Modules already inspected for this wrapper.
+ * @param {Set<string>} seen Modules already inspected for this wrapper.
+ * @param {ResolveImports} resolveImports The cached static-import resolver.
+ * @param {ModuleImportGraph} [graph] The resolved target graph, if already available.
  */
-function * findCyclicImports (url, context, cycleState, seen) {
-  if (seen.has(url)) return
+function * findCyclicImports (url, context, cycleState, seen, resolveImports, graph) {
+  graph ??= yield * resolveImports(url, context)
+  if (graph.acyclic) return true
+  if (seen.has(url)) return false
   seen.add(url)
-  const { moduleImports } = yield * getModuleExports(url, context, true)
-  if (moduleImports === undefined) return
-
-  for (const imported of moduleImports) {
-    const specifier = typeof imported === 'string' ? imported : imported.specifier
-    const importAttributes = typeof imported === 'string' ? {} : Object.fromEntries(imported.attributes)
-    const result = yield [RESOLVE, specifier, { parentURL: url, importAttributes }]
-    if (result.url === cycleState.rootUrl) {
+  let acyclic = true
+  for (const imported of graph.targets) {
+    const { url: target, format, importAttributes } = imported
+    if (target === cycleState.rootUrl) {
       cycleState.imports ??= new Set()
       cycleState.imports.add(url)
-    } else if (result.format === 'module' || result.format === 'module-typescript' || result.format === undefined) {
-      yield * findCyclicImports(result.url, { ...context, format: result.format, importAttributes }, cycleState, seen)
+      acyclic = false
+    } else if (format === 'module' || format === 'module-typescript' || format === undefined) {
+      if (imported.graph?.acyclic) continue
+      const targetContext = { ...context, format, importAttributes }
+      imported.graph ??= yield * resolveImports(target, targetContext)
+      if (!(yield * findCyclicImports(target, targetContext, cycleState, seen, resolveImports, imported.graph))) {
+        acyclic = false
+      }
     }
   }
+  if (acyclic) graph.acyclic = true
+  return acyclic
 }
 
 /**
@@ -416,11 +423,6 @@ export function createHook (meta) {
   /** @type {Map<string, SpecifierData>} */
   const specifiers = new Map()
   let cachedResolve
-  // Each native URL records visited-source and staged-root flags.
-  /** @type {Map<string, number> | undefined} */
-  let nativeCycleModules
-  /** @type {((specifier: string, context?: Partial<ResolveContext>) => ResolveResult) | undefined} */
-  let nativeCycleResolve
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   const createHookURL = meta.url.replace('hook.mjs', 'create-hook.mjs')
   let includeModules, excludeModules
@@ -430,6 +432,31 @@ export function createHook (meta) {
   let cyclicImportTargets
   /** @type {Map<string, string> | undefined} */
   let cyclicSources
+  /** @type {Map<string, ModuleImportGraph> | undefined} */
+  let moduleImportTargets
+
+  /**
+   * @param {string} url The module whose static imports are resolved.
+   * @param {LoadContext} context Its metadata load context.
+   */
+  function * resolveImports (url, context) {
+    const cached = moduleImportTargets?.get(url)
+    if (cached !== undefined) return cached
+    const { moduleImports } = yield * getModuleExports(url, context, true)
+    const targets = []
+    if (moduleImports !== undefined) {
+      for (const imported of moduleImports) {
+        const specifier = typeof imported === 'string' ? imported : imported.specifier
+        const importAttributes = typeof imported === 'string' ? {} : Object.fromEntries(imported.attributes)
+        const { url: target, format } = yield [RESOLVE, specifier, { parentURL: url, importAttributes }]
+        targets.push({ url: target, format, importAttributes, graph: undefined })
+      }
+    }
+    moduleImportTargets ??= new Map()
+    const graph = { targets, acyclic: false }
+    moduleImportTargets.set(url, graph)
+    return graph
+  }
 
   /**
    * @param {string} url The native module URL.
@@ -712,8 +739,6 @@ export function createHook (meta) {
    */
   function resolveSync (specifier, context, nextResolve) {
     cachedResolve = nextResolve
-    // CJS resolvers on Node 22 close over their require parent.
-    if (nativeCycleModules !== undefined && !context.conditions?.includes('require')) nativeCycleResolve = nextResolve
     const { parentURL = '' } = context
 
     if (specifier === iitmURL) {
@@ -830,25 +855,18 @@ ${staged
    * @param {string} originalSpecifier The original import specifier.
    * @param {ProcessResult} result The processed export bindings and cycle candidates.
    */
-  function onWrapSuccess (realUrl, format, originalSpecifier, { bindings, cyclicImports, staged }) {
+  function onWrapSuccess (realUrl, format, originalSpecifier, { bindings, cyclicImports }) {
     specifiers.delete(realUrl)
     if (format === 'commonjs') {
       cjsInIitmChain.add(realUrl)
     }
-    if (staged) {
-      nativeCycleModules ??= new Map()
-      nativeCycleModules.set(realUrl, (nativeCycleModules.get(realUrl) ?? NATIVE_VISITED) | NATIVE_STAGED)
-      for (const candidate of cyclicImports) {
-        if (!nativeCycleModules.has(candidate)) nativeCycleModules.set(candidate, 0)
-      }
-    }
-    if (cyclicImports === undefined && !staged) return buildWrapperSource(realUrl, bindings, originalSpecifier, format)
+    if (cyclicImports === undefined) return buildWrapperSource(realUrl, bindings, originalSpecifier, format)
 
     const bindingURL = addIitm(realUrl, 'bindings')
     const { source, facadeSpecifiers } = buildWrapperSource(realUrl, bindings, originalSpecifier, format, true)
     cyclicSources ??= new Map()
     cyclicSources.set(bindingURL, source)
-    if (!staged) mergeCyclicImports(cyclicImports, realUrl)
+    mergeCyclicImports(cyclicImports, realUrl)
     return `
 import ${JSON.stringify(realUrl)}
 import __binder from ${JSON.stringify(bindingURL)}
@@ -897,7 +915,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
 
     try {
       const result = await driveAsync(
-        processModule({ srcUrl: realUrl, context: processContext }),
+        processModule({ srcUrl: realUrl, context: processContext, resolveImports }),
         { resolve: cachedResolve, load: parentGetSource }
       )
       const source = onWrapSuccess(realUrl, result.format, originalSpecifier, result)
@@ -909,40 +927,6 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
     }
 
     return parentGetSource(url, context)
-  }
-
-  /**
-   * @param {string} url The native module URL.
-   * @param {LoadContext} context Its native load context.
-   * @param {LoadResult} result The source already returned by the upstream loader.
-   */
-  function prepareNativeSourceSync (url, context, result) {
-    const state = nativeCycleModules?.get(url)
-    if (state === undefined || (state & NATIVE_VISITED) !== 0 || result.source == null ||
-        (result.format !== 'module' && result.format !== 'module-typescript')) return result
-    nativeCycleModules.set(url, state | NATIVE_VISITED)
-    const { moduleImports } = driveSync(getModuleExports(url, context, true), { load: () => result })
-    if (moduleImports === undefined) return result
-
-    let targets
-    for (const imported of moduleImports) {
-      const specifier = typeof imported === 'string' ? imported : imported.specifier
-      const importAttributes = typeof imported === 'string' ? {} : Object.fromEntries(imported.attributes)
-      const resolved = (nativeCycleResolve ?? cachedResolve)(specifier, { parentURL: url, importAttributes })
-      if (resolved.format !== 'module' && resolved.format !== 'module-typescript' && resolved.format !== undefined) continue
-      const targetState = nativeCycleModules.get(resolved.url)
-      if (targetState === undefined) nativeCycleModules.set(resolved.url, 0)
-      if (resolved.url !== url && (targetState & NATIVE_STAGED) !== 0) {
-        targets ??= new Set()
-        targets.add(resolved.url)
-      }
-    }
-    if (targets === undefined) return result
-    let bindingImports = ''
-    for (const target of targets) {
-      bindingImports += `\nimport ${JSON.stringify(addIitm(target, 'bindings'))}\n`
-    }
-    return { ...result, source: sourceToString(result.source) + bindingImports }
   }
 
   // Synchronous counterpart to `getSource`, for `module.registerHooks`. Drives
@@ -970,12 +954,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
 
     try {
       const result = driveSync(
-        processModule({
-          srcUrl: realUrl,
-          context: processContext,
-          stageCycles: true,
-          collectModuleImports: ((nativeCycleModules?.get(realUrl) ?? NATIVE_VISITED) & NATIVE_VISITED) === 0
-        }),
+        processModule({ srcUrl: realUrl, context: processContext, resolveImports }),
         { resolve: cachedResolve, load: nextLoad }
       )
       const source = onWrapSuccess(realUrl, result.format, originalSpecifier, result)
@@ -1083,7 +1062,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       return result
     }
 
-    return prepareNativeSourceSync(url, context, nextLoad(url, context))
+    return prepareNativeSource(url, nextLoad(url, context))
   }
 
   return { initialize, load, resolve, resolveSync, loadSync, applyOptions }

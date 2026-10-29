@@ -10,14 +10,20 @@ export async function testCircularReexport (consumerFirst) {
   /**
    * @param {Record<string, unknown>} exports
    * @param {string} name
+   * @param {string | undefined} baseDir
+   * @param {string | undefined} format
    */
-  const hook = new Hook((exports, name) => {
+  const hook = new Hook((exports, name, baseDir, format) => {
     if (name.endsWith('circular-reexport-barrel.mjs')) {
+      strictEqual(format, 'module')
       barrelHooked = true
       exports.value = 2
       if (consumerFirst) exports.UserError = HookedUserError
     }
-    if (name.endsWith('circular-reexport-consumer.mjs')) consumerHooked = true
+    if (name.endsWith('circular-reexport-consumer.mjs')) {
+      strictEqual(format, 'module')
+      consumerHooked = true
+    }
   })
   let lateHook
   try {
@@ -43,9 +49,14 @@ export async function testCircularReexport (consumerFirst) {
     /**
      * @param {Record<string, unknown>} exports
      * @param {string} name
+     * @param {string | undefined} baseDir
+     * @param {string | undefined} format
      */
-    lateHook = new Hook((exports, name) => {
-      if (name.endsWith('circular-reexport-barrel.mjs')) exports.value = 3
+    lateHook = new Hook((exports, name, baseDir, format) => {
+      if (name.endsWith('circular-reexport-barrel.mjs')) {
+        strictEqual(format, 'module')
+        exports.value = 3
+      }
     })
     strictEqual(loaded.value, 3)
     strictEqual(loaded.readValue(), 3)
