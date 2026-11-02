@@ -131,7 +131,7 @@ function measure (packageDirectory, scenario) {
     ? ['--loader', resolve(packageDirectory, 'hook.mjs'), fixture]
     : [fixture]
   if (process.allowedNodeEnvironmentFlags.has('--disable-warning')) {
-    argumentsList.unshift('--disable-warning=ExperimentalWarning')
+    argumentsList.unshift('--disable-warning=ExperimentalWarning', '--disable-warning=DEP0205')
   }
   const environment = {
     ...process.env,
