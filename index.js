@@ -32,6 +32,53 @@ function isPackageSpecifier (specifier, baseDir) {
   return hashSeparator !== -1 && baseDir.endsWith(specifier.slice(0, hashSeparator))
 }
 
+// Every Hook instance resolves the same details for a given module load, so the
+// result for the most recent URL is shared instead of being recomputed per Hook.
+// The details depend only on the URL, so a stale entry can never be returned.
+let lastLoadUrl
+let lastDetails
+
+/**
+ * @param {string} loadUrl
+ * @returns {{ name: string, filePath: string | undefined, baseDir: string | undefined }}
+ */
+function getModuleDetails (loadUrl) {
+  if (loadUrl === lastLoadUrl) return lastDetails
+
+  let name = loadUrl
+  let filePath, baseDir
+
+  if (loadUrl.startsWith('node:')) {
+    // Normalize builtin module name to *not* have 'node:' prefix, unless
+    // required, as it is for 'node:test' and some others.  `module.isBuiltin`
+    // is available in all Node.js versions that have node:-only modules.
+    const unprefixed = loadUrl.slice(5)
+    if (isBuiltin(unprefixed)) {
+      name = unprefixed
+    }
+  } else if (loadUrl.startsWith('file://')) {
+    const stackTraceLimit = Error.stackTraceLimit
+    Error.stackTraceLimit = 0
+    try {
+      filePath = fileURLToPath(loadUrl)
+      name = filePath
+    } catch (e) {}
+    Error.stackTraceLimit = stackTraceLimit
+
+    if (filePath) {
+      const details = moduleDetailsFromPath(filePath)
+      if (details) {
+        name = details.name
+        baseDir = details.basedir
+      }
+    }
+  }
+
+  lastLoadUrl = loadUrl
+  lastDetails = { name, filePath, baseDir }
+  return lastDetails
+}
+
 /** @param {import('./index').HookFunction} hook */
 function addHook (hook) {
   importHooks.push(hook)
@@ -150,41 +197,13 @@ function Hook (modules, options, hookFn) {
   }
 
   /**
-   * @param {string} name
+   * @param {string} loadUrl
    * @param {import('./index').Namespace} namespace
    * @param {string} specifier
    * @param {string | undefined} format
    */
-  this._iitmHook = (name, namespace, specifier, format) => {
-    const loadUrl = name
-    const isNodeUrl = loadUrl.startsWith('node:')
-    let filePath, baseDir
-
-    if (isNodeUrl) {
-      // Normalize builtin module name to *not* have 'node:' prefix, unless
-      // required, as it is for 'node:test' and some others.  `module.isBuiltin`
-      // is available in all Node.js versions that have node:-only modules.
-      const unprefixed = name.slice(5)
-      if (isBuiltin(unprefixed)) {
-        name = unprefixed
-      }
-    } else if (loadUrl.startsWith('file://')) {
-      const stackTraceLimit = Error.stackTraceLimit
-      Error.stackTraceLimit = 0
-      try {
-        filePath = fileURLToPath(name)
-        name = filePath
-      } catch (e) {}
-      Error.stackTraceLimit = stackTraceLimit
-
-      if (filePath) {
-        const details = moduleDetailsFromPath(filePath)
-        if (details) {
-          name = details.name
-          baseDir = details.basedir
-        }
-      }
-    }
+  this._iitmHook = (loadUrl, namespace, specifier, format) => {
+    const { name, filePath, baseDir } = getModuleDetails(loadUrl)
 
     if (modules) {
       for (const matchArg of modules) {
