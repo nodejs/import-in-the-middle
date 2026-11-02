@@ -9,7 +9,7 @@
 import * as nodeModule from 'node:module'
 import { register, supportsSyncHooks } from '../../register-hooks.mjs'
 import Hook from '../../index.js'
-import { ok, strictEqual } from 'node:assert/strict'
+import { ok, strictEqual, throws } from 'node:assert/strict'
 import { loadSync } from '../fixtures/builtin-source-loader.mjs'
 
 if (!supportsSyncHooks()) {
@@ -18,15 +18,19 @@ if (!supportsSyncHooks()) {
 }
 
 nodeModule.registerHooks({ load: loadSync })
+const nativeFs = await import('node:fs')
+nativeFs.default.iitmReviewCustom = 1
+
 register()
 
 let eventsHookCount = 0
 let fsHookCount = 0
 
 // eslint-disable-next-line no-new
-new Hook(['events', 'fs'], (exports, name) => {
+new Hook(['events', 'fs'], { replaceExports: [] }, (exports, name) => {
   if (name === 'events') eventsHookCount++
   if (name === 'fs') fsHookCount++
+  throws(() => { exports.default = undefined }, { name: 'TypeError' })
 })
 
 const events = await import('node:events')
@@ -45,9 +49,12 @@ ok('kMaxEventTargetListeners' in events, 'non-enumerable own property should be 
 
 const fs = await import('node:fs')
 strictEqual(fsHookCount, 1, 'fs hook should fire exactly once')
+ok(!('iitmReviewCustom' in fs), 'late CommonJS properties should not become ESM exports')
+strictEqual(fs.default.iitmReviewCustom, 1, 'default should retain late CommonJS properties')
 strictEqual(typeof fs.readFileSync, 'function', 'readFileSync named export should be present')
 strictEqual(typeof fs.existsSync, 'function', 'existsSync named export should be present')
 strictEqual(typeof fs.default.readFileSync, 'function', 'default should carry the CJS exports')
+delete nativeFs.default.iitmReviewCustom
 
 // `module.registerHooks` also intercepts CommonJS `require()`. Unlike the ESM
 // imports above, a `require()` must return the native, mutable builtin rather

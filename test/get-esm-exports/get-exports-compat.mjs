@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from 'assert'
 
-import { getExports } from '../../lib/get-exports.mjs'
+import { getExports, getModuleExports } from '../../lib/get-exports.mjs'
 import { driveAsync } from '../../lib/io.mjs'
 
 const modules = new Map([
@@ -24,3 +24,13 @@ deepStrictEqual([...directExports], ['direct'])
 const starExports = await driveAsync(getExports('file:///star.mjs', { format: 'module' }), io)
 strictEqual(starExports instanceof Set, true)
 deepStrictEqual([...starExports], ['direct', '* from ./dependency.mjs'])
+
+for (const [url, source] of modules) {
+  const result = await driveAsync(getModuleExports(url + '?omitted-format', { format: 'module' }), {
+    async load () {
+      return { source }
+    }
+  })
+  strictEqual(result.format, 'module')
+  strictEqual(result.moduleFormat, 'module')
+}

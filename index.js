@@ -14,9 +14,18 @@ if (!isBuiltin) {
 
 const {
   importHooks,
+  registerHookCapability,
+  removeHookCapability,
+  replayHookCapabilities,
   specifiers,
   toHook
 } = require('./lib/register')
+
+/** @typedef {import('./index').HookFunction} ImportHook */
+/** @typedef {import('./lib/register').HookCapability} HookCapability */
+/** @typedef {import('./lib/register').HookCapabilityRemoval} HookCapabilityRemoval */
+/** @type {WeakMap<ImportHook, HookCapability[]>} */
+const hookCapabilities = new WeakMap()
 
 /**
  * @param {string} specifier
@@ -32,17 +41,59 @@ function isPackageSpecifier (specifier, baseDir) {
   return hashSeparator !== -1 && baseDir.endsWith(specifier.slice(0, hashSeparator))
 }
 
-/** @param {import('./index').HookFunction} hook */
-function addHook (hook) {
+/**
+ * @param {ImportHook} hook
+ * @param {HookCapability} capability
+ */
+function addHookInternal (hook, capability) {
   importHooks.push(hook)
-  toHook.forEach(([name, namespace, specifier, format]) => hook(name, namespace, specifier, format))
+  const capabilities = hookCapabilities.get(hook)
+  if (capabilities === undefined) {
+    hookCapabilities.set(hook, [capability])
+  } else {
+    capabilities.push(capability)
+  }
+  try {
+    toHook.forEach(([name, namespace, specifier, format]) => hook(name, namespace, specifier, format))
+  } catch (error) {
+    removeHookInternal(hook, capability)
+    throw error
+  }
 }
 
-function removeHook (hook) {
-  const index = importHooks.indexOf(hook)
-  if (index > -1) {
-    importHooks.splice(index, 1)
+/**
+ * @param {ImportHook} hook
+ * @returns {void}
+ */
+function addHook (hook) {
+  const capability = registerHookCapability(undefined, undefined)
+  sendHookCapabilityToLoader(capability)
+  addHookInternal(hook, capability)
+}
+
+/**
+ * @param {ImportHook} hook
+ * @param {HookCapability} capability
+ */
+function removeHookInternal (hook, capability) {
+  const capabilities = hookCapabilities.get(hook)
+  const index = capabilities.indexOf(capability)
+
+  let hookIndex = importHooks.indexOf(hook)
+  for (let i = 0; i < index; i++) {
+    hookIndex = importHooks.indexOf(hook, hookIndex + 1)
   }
+  importHooks.splice(hookIndex, 1)
+  capabilities.splice(index, 1)
+  if (capabilities.length === 0) hookCapabilities.delete(hook)
+  const removal = removeHookCapability(capability)
+  sendHookCapabilityToLoader(removal)
+}
+
+/** @param {ImportHook} hook */
+function removeHook (hook) {
+  const capability = hookCapabilities.get(hook)?.[0]
+  if (capability !== undefined) removeHookInternal(hook, capability)
 }
 
 /**
@@ -65,6 +116,33 @@ function callHookFn (hookFn, namespace, name, baseDir, format) {
 }
 
 let sendModulesToLoader
+
+/**
+ * @param {HookCapability | HookCapabilityRemoval} update
+ * @param {boolean} [select]
+ */
+function sendHookCapabilityToLoader (update, select = false) {
+  sendModulesToLoader?.(select ? { ...update, select: true } : update)
+}
+
+/**
+ * @param {import('./index').Options | null | undefined} options
+ * @returns {ReadonlyArray<string> | null | undefined}
+ */
+function getReplaceExports (options) {
+  const replaceExports = options?.replaceExports
+  if (replaceExports === undefined) return
+  if (replaceExports === null) return null
+  if (!Array.isArray(replaceExports)) {
+    throw new TypeError("The 'replaceExports' option must be null or an array of export names")
+  }
+  for (let index = 0; index < replaceExports.length; index++) {
+    if (typeof replaceExports[index] !== 'string') {
+      throw new TypeError("The 'replaceExports' option must be null or an array of export names")
+    }
+  }
+  return replaceExports.length === 0 ? null : replaceExports.slice()
+}
 
 /**
  * EXPERIMENTAL
@@ -130,9 +208,16 @@ function createAddHookMessageChannel () {
   const addHookMessagePort = port2
   const registerOptions = { data: { addHookMessagePort, include: [] }, transferList: [addHookMessagePort] }
 
+  replayHookCapabilities(sendHookCapabilityToLoader)
+
   return { registerOptions, addHookMessagePort, waitForAllMessagesAcknowledged }
 }
 
+/**
+ * @param {string[] | import('./index.js').HookFn | undefined} modules
+ * @param {import('./index.js').Options | import('./index.js').HookFn} [options]
+ * @param {import('./index.js').HookFn} [hookFn]
+ */
 function Hook (modules, options, hookFn) {
   if ((this instanceof Hook) === false) return new Hook(modules, options, hookFn)
   if (typeof modules === 'function') {
@@ -144,10 +229,10 @@ function Hook (modules, options, hookFn) {
     options = null
   }
   const internals = options ? options.internals === true : false
+  const replaceExports = getReplaceExports(options)
 
-  if (sendModulesToLoader && Array.isArray(modules)) {
-    sendModulesToLoader(modules)
-  }
+  const capability = registerHookCapability(Array.isArray(modules) ? modules : undefined, replaceExports, internals)
+  sendHookCapabilityToLoader(capability, true)
 
   /**
    * @param {string} name
@@ -215,7 +300,7 @@ function Hook (modules, options, hookFn) {
     }
   }
 
-  addHook(this._iitmHook)
+  addHookInternal(this._iitmHook, capability)
 }
 
 Hook.prototype.unhook = function () {
