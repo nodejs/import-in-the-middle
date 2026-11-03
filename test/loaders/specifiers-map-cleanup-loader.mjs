@@ -4,7 +4,14 @@ import { createHook } from '../fixtures/inspectable-create-hook.mjs'
 // Keeping this file outside of `test/hook/` avoids having the test runner execute it directly.
 
 const meta = { url: new URL('../../hook.mjs', import.meta.url).href }
-const { initialize, load, resolve, specifiers } = createHook(meta)
+const hook = createHook(meta)
+const { load, resolve, specifiers } = hook
+
+/** @param {{ inspectPort?: import('node:worker_threads').MessagePort }} data */
+async function initialize (data) {
+  await hook.initialize(data)
+  data?.inspectPort?.on('message', () => data.inspectPort.postMessage(specifiers.size)).unref()
+}
 
 process.on('exit', () => {
   if (specifiers.size !== 0) {

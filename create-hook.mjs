@@ -9,10 +9,10 @@ import { isAbsolute } from 'path'
 import { getModuleExports } from './lib/get-exports.mjs'
 import { RESOLVE, driveSync, driveAsync } from './lib/io.mjs'
 import { supportsSyncHooks } from './supports-sync-hooks.mjs'
+import { legacyLoaderSource } from './lib/registry.js'
+import { parseIitm, deleteIitm } from './lib/iitm-url.js'
 
-// Re-exported for backwards compatibility: `supportsSyncHooks` now lives in its
-// own import-free module so a CommonJS preloader can check it without loading
-// this file's acorn / cjs-module-lexer dependency graph.
+// A preloader can check runtime support without loading the parser dependency graph.
 export { supportsSyncHooks }
 
 const isWin = process.platform === 'win32'
@@ -48,27 +48,8 @@ const TRACE_WARNINGS = process.execArgv.includes('--trace-warnings')
  */
 
 /** @param {string} url The module URL or specifier. */
-function parseIitm (url) {
-  const queryIndex = url.indexOf('?')
-  if (queryIndex === -1 || url.indexOf('iitm', queryIndex) === -1) return
-  try {
-    const parsed = new URL(url)
-    if (parsed.searchParams.has('iitm')) return parsed
-  } catch {}
-}
-
-/** @param {string} url The module URL or specifier. */
 function hasIitm (url) {
   return parseIitm(url) !== undefined
-}
-
-/** @param {URL} parsedURL The parsed wrapper URL. */
-function deleteIitm (parsedURL) {
-  parsedURL.searchParams.delete('iitm')
-  const resultUrl = parsedURL.href
-  return resultUrl.startsWith('file:///node:')
-    ? resultUrl.slice('file:///'.length)
-    : resultUrl
 }
 
 function isBareSpecifier (specifier) {
@@ -364,7 +345,7 @@ export function createHook (meta) {
   // intercept those require() calls and return an ESM namespace object instead
   // of the native CJS module value (e.g. EventEmitter constructor), breaking
   // patterns like `class App extends require('events') {}`.
-  const cjsInIitmChain = new Set()
+  const cjsInIitmChain = new Set([iitmURL])
 
   // Default matcher, used unless the consumer supplies its own `shouldInclude`
   // (see applyOptions). It applies the include/exclude lists, so finishResolve
@@ -468,6 +449,7 @@ export function createHook (meta) {
    * @param {string} parentURL The importing module URL.
    */
   function finishResolve (result, specifier, context, parentURL) {
+    if (result.url.includes('?iitm-legacy-loader')) return result
     // Do not wrap the entrypoint module. Many CLIs check whether they are the
     // "main" module (e.g. require.main === module). Wrapping changes how they
     // are evaluated, and can make them exit without doing anything.
@@ -802,6 +784,8 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
    * @param {(url: string, context?: Partial<LoadContext>) => LoadResult | Promise<LoadResult>} parentLoad
    */
   async function load (url, context, parentLoad) {
+    const legacySource = legacyLoaderSource(url)
+    if (legacySource !== undefined) return { source: legacySource, format: 'module', shortCircuit: true }
     const parsedURL = parseIitm(url)
     if (parsedURL !== undefined) {
       const realUrl = deleteIitm(parsedURL)
@@ -819,6 +803,9 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       // Fall back to the parent loader with the original (non-iitm) URL.
       return parentLoad(realUrl, context)
     }
+
+    // An outer loader can consume our tagged resolution and request the original source.
+    specifiers.delete(url)
 
     // On Node 22+, when a CJS module is loaded through the ESM translator and
     // another loader hook provides its source (instead of leaving source null
@@ -868,6 +855,7 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
       return nextLoad(realUrl, context)
     }
 
+    specifiers.delete(url)
     if (cjsInIitmChain.has(url) && !disableCjsSourceStripping) {
       const result = nextLoad(url, context)
       if (result.format === 'commonjs' && result.source != null) {

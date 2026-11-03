@@ -203,6 +203,7 @@ function Hook (modules, options, hookFn) {
    * @param {string | undefined} format
    */
   this._iitmHook = (loadUrl, namespace, specifier, format) => {
+    specifier ??= specifiers.get(loadUrl)
     const { name, filePath, baseDir } = getModuleDetails(loadUrl)
 
     if (modules) {

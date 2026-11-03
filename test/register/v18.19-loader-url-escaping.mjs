@@ -1,6 +1,6 @@
 import { strictEqual } from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -11,7 +11,7 @@ const testDirectory = await mkdtemp(join(packageRoot, 'test', "iitm's-fixture-")
 const installedPackageDirectory = join(testDirectory, 'node_modules', 'import-in-the-middle')
 
 try {
-  await mkdir(join(installedPackageDirectory, 'lib'), { recursive: true })
+  await mkdir(installedPackageDirectory, { recursive: true })
 
   const packageFiles = [
     'create-hook.mjs',
@@ -19,13 +19,9 @@ try {
     'index.js',
     'package.json',
     'register-hooks.mjs',
-    'supports-sync-hooks.mjs',
-    'lib/get-esm-exports.mjs',
-    'lib/get-exports.mjs',
-    'lib/io.mjs',
-    'lib/register.js'
+    'supports-sync-hooks.mjs'
   ]
-  const setupPromises = []
+  const setupPromises = [cp(join(packageRoot, 'lib'), join(installedPackageDirectory, 'lib'), { recursive: true })]
   for (const filename of packageFiles) {
     setupPromises.push(copyFile(join(packageRoot, filename), join(installedPackageDirectory, filename)))
   }

@@ -38,11 +38,12 @@ to `addHook` callbacks, after the original import specifier. Hooks registered af
 an import receive the same format during replay. Older generated wrappers provide
 `undefined`, so consumers must handle missing format metadata.
 
-Separate installed copies share hooks when they implement the same registry
-protocol. This applies to synchronous and asynchronous loaders. Callbacks run in
-registration order, and hooks registered after an import receive loaded modules
-through replay. Older copies with a module-local registry do not participate.
-Deduplicate those copies or upgrade them to a release with the shared registry.
+Separate installed copies share hooks with synchronous and asynchronous loaders.
+The current implementation also adapts older copies at runtime without changing
+their installed files. Hooks registered after an import receive loaded modules
+through replay. Callbacks run in registration order after their registry joins.
+Existing callbacks retain their order within each older copy; order across
+previously loaded copies follows registry discovery.
 
 This requires the use of an ESM loader hook, which can be added with the following
 command-line option.
