@@ -54,8 +54,6 @@
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^6.6.0",
     "got": "^14.6.6",
-    "iitm-legacy-v1": "npm:import-in-the-middle@1.15.0",
-    "iitm-legacy-v2": "npm:import-in-the-middle@2.0.6",
     "iitm-legacy-v3": "npm:import-in-the-middle@3.3.1",
     "imhotap": "^2.2.0",
     "openai": "4.47.2",

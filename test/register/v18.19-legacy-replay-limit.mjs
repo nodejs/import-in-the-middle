@@ -2,7 +2,7 @@ import { strictEqual } from 'node:assert/strict'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
-const legacy = require('iitm-legacy-v1/lib/register.js')
+const legacy = require('iitm-legacy-v3/lib/register.js')
 const count = 150_000
 const base = new URL('../fixtures/legacy-replay/', import.meta.url).href
 

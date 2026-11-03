@@ -39,9 +39,10 @@ an import receive the same format during replay. Older generated wrappers provid
 `undefined`, so consumers must handle missing format metadata.
 
 Separate installed copies share hooks with synchronous and asynchronous loaders.
-The current implementation also adapts older copies at runtime without changing
-their installed files. Hooks registered after an import receive loaded modules
-through replay. Callbacks run in registration order after their registry joins.
+The current implementation also adapts older v3 copies at runtime without changing
+their installed files. Copies from v1 and v2 are not adapted.
+Hooks registered after an import receive loaded modules through replay.
+Callbacks run in registration order after their registry joins.
 Existing callbacks retain their order within each older copy; order across
 previously loaded copies follows registry discovery.
 
