@@ -147,16 +147,23 @@ function interceptTimeouts () {
 
 // Exhausting every retry releases the pending updater and later flushes stay
 // inactive, even if the source eventually gets a value.
-{
+for (const temporalDeadZone of [false, true]) {
   const { callbacks, restore } = interceptTimeouts()
   try {
-    const source = {}
+    let initialized = false
+    const source = {
+      get foo () {
+        if (temporalDeadZone && !initialized) throw new ReferenceError('tdz')
+        return initialized ? 13 : undefined
+      }
+    }
     const { binder, slot } = makeBinder(source)
     binder.flush()
     await Promise.resolve()
     while (callbacks.length > 0) callbacks.shift()()
 
-    source.foo = 13
+    initialized = true
+    makeBinder({})
     binder.flush()
     await Promise.resolve()
     strictEqual(slot.value, undefined, 'exhausted updater is not retried')
