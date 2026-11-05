@@ -8,6 +8,7 @@ const result = { source: null, format: 'json', shortCircuit: true }
 const realURL = 'file:///wrapper-source-fallback.json'
 const wrapperURL = `${realURL}?iitm=true`
 const invalidURL = '://invalid?iitm=true'
+const bindingURL = `${realURL}?iitm=bindings`
 
 for (const load of [hook.load, hook.loadSync]) {
   const loadedURLs = []
@@ -19,7 +20,8 @@ for (const load of [hook.load, hook.loadSync]) {
 
   strictEqual(await load(invalidURL, { format: 'json' }, nextLoad), result)
   strictEqual(await load(wrapperURL, { format: 'json' }, nextLoad), result)
-  deepStrictEqual(loadedURLs, [invalidURL, wrapperURL, realURL])
+  strictEqual(await load(bindingURL, { format: 'module' }, nextLoad), result)
+  deepStrictEqual(loadedURLs, [invalidURL, wrapperURL, realURL, bindingURL])
 }
 
 for (const resolve of [hook.resolve, hook.resolveSync]) {
