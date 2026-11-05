@@ -48,7 +48,6 @@ const objectCases = {
   'non-string specifier': { ...base, specifier: 42 },
   'non-function resolve': { ...base, resolve: {} },
   'non-function load': { ...base, load: 'load' },
-  'non-function mapImport': { ...base, mapImport: {} },
   'unknown builtin': { url: 'node:no-such-builtin', specifier: 'no-such-builtin' },
   'builtin with source': { url: 'node:events', specifier: 'events', source: '' },
   'builtin with non-function resolve': { url: 'node:events', specifier: 'events', resolve: {} },
@@ -87,17 +86,6 @@ assert.throws(
   () => createWrapperModule({ ...base, sync: true, load: rejectLater }),
   (err) => err instanceof TypeError && /load\(\)/.test(err.message) && /sync/.test(err.message)
 )
-assert.throws(
-  () => createWrapperModule({ ...base, sync: true, mapImport: rejectLater }),
-  (err) => err instanceof TypeError && /mapImport\(\)/.test(err.message) && /sync/.test(err.message)
-)
-
-// `mapImport` is synchronous in async mode too: a Promise rejects the call,
-// and is observed as well.
-await assert.rejects(
-  createWrapperModule({ ...base, mapImport: rejectLater }),
-  (err) => err instanceof TypeError && /mapImport\(\)/.test(err.message) && /sync/.test(err.message)
-)
 
 await new Promise((resolve) => setTimeout(resolve, 50))
 process.off('unhandledRejection', onUnhandled)
@@ -131,8 +119,31 @@ const malformed = {
     load: () => ({ source: null, format: 'builtin' }),
     message: /not a builtin/
   },
-  'mapImport returns empty string': { mapImport: () => '' },
-  'mapImport returns a number': { mapImport: () => 42 }
+  'resolve returns a numeric format': { resolve: () => ({ url: depUrl, format: 1 }), message: /string format/ },
+  'load returns a numeric format': {
+    load: () => ({ source: 'export const a = 1\n', format: 1 }),
+    message: /string format/
+  },
+  'resolve returns string watchFiles': {
+    resolve: () => ({ url: depUrl, watchFiles: 'file:///virtual/errors/package.json' }),
+    message: /resolve\(\).*watchFiles as an iterable/
+  },
+  'resolve returns non-iterable watchFiles': {
+    resolve: () => ({ url: depUrl, watchFiles: {} }),
+    message: /resolve\(\).*watchFiles as an iterable/
+  },
+  'resolve returns a relative watch file': {
+    resolve: () => ({ url: depUrl, watchFiles: ['./package.json'] }),
+    message: /resolve\(\).*not an absolute URL/
+  },
+  'load returns null watchFiles': {
+    load: () => ({ source: 'export const a = 1\n', watchFiles: null }),
+    message: /load\(\).*watchFiles as an iterable/
+  },
+  'load returns a numeric watch file': {
+    load: () => ({ source: 'export const a = 1\n', watchFiles: [1] }),
+    message: /load\(\).*not an absolute URL/
+  }
 }
 for (const [name, { message = /./, ...adapters }] of Object.entries(malformed)) {
   const matches = (err) => err instanceof TypeError && message.test(err.message)

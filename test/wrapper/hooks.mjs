@@ -1,16 +1,55 @@
-// Executes generated facades without any loader: the original package lives in
-// a temp node_modules, the facade is written to a different file and imported
-// directly, so the default identity `mapImport` points it at the original file
-// and at the same `lib/register.js` instance `Hook`/`addHook` use.
+// Executes generated facades without IITM's loader: the original package lives
+// in a temp node_modules, and the facade is written to a different file with
+// its `imports` manifest next to it. Each placeholder is resolved through the
+// manifest to the original file and to the same `lib/register.js` instance
+// `Hook`/`addHook` use: by a `module.register` resolve hook where available,
+// otherwise by rewriting the placeholders to their targets.
 
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import * as nodeModule from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { init, parse } from 'es-module-lexer'
 
 import { Hook, addHook, removeHook } from '../../index.js'
 import { createWrapperModule } from '../../wrapper.mjs'
+
+await init
+
+const useLoader = typeof nodeModule.register === 'function'
+if (useLoader) {
+  nodeModule.register(new URL('../fixtures/wrapper-manifest-loader.mjs', import.meta.url))
+}
+
+/**
+ * Replaces each placeholder of `code` with its manifest target.
+ *
+ * @param {{ code: string, imports: { specifier: string, target: { url: string } }[] }} result
+ */
+function link ({ code, imports }) {
+  const targets = new Map(imports.map(({ specifier, target }) => [specifier, target.url]))
+  let linked = ''
+  let last = 0
+  for (const { specifier, start, end } of parse(code)[0]) {
+    linked += code.slice(last, start) + JSON.stringify(targets.get(specifier)).slice(1, -1)
+    last = end
+  }
+  return linked + code.slice(last)
+}
+
+/**
+ * Writes the facade and its manifest, and imports it.
+ *
+ * @param {string} path
+ * @param {{ code: string, imports: object[] }} result
+ */
+async function importFacade (path, result) {
+  writeFileSync(path, useLoader ? result.code : link(result))
+  writeFileSync(`${path}.imports.json`, JSON.stringify(result.imports))
+  return import(pathToFileURL(path).href)
+}
 
 /**
  * @param {string} dir
@@ -42,7 +81,9 @@ function options (url, specifier) {
   }
 }
 
-const dir = mkdtempSync(join(tmpdir(), 'iitm-wrapper-'))
+// Canonical URLs are real paths (macOS tmpdir is a symlink), as the manifest
+// targets resolve without Node.js's own symlink resolution.
+const dir = realpathSync(mkdtempSync(join(tmpdir(), 'iitm-wrapper-')))
 
 try {
   const pkgDir = join(dir, 'node_modules', 'wrap-pkg')
@@ -59,10 +100,14 @@ try {
   })
   const url = pathToFileURL(join(pkgDir, 'index.js')).href
 
-  const code = await createWrapperModule(options(url, 'wrap-pkg'))
-  assert.equal(typeof code, 'string')
-  assert.equal(createWrapperModule({ ...options(url, 'wrap-pkg'), sync: true }), code,
-    'sync generation should produce identical code')
+  const result = await createWrapperModule(options(url, 'wrap-pkg'))
+  assert.deepEqual(createWrapperModule({ ...options(url, 'wrap-pkg'), sync: true }), result,
+    'sync generation should produce an identical result')
+  assert.deepEqual(result.imports.map(({ target }) => target.url), [
+    new URL('../../lib/register.js', import.meta.url).href,
+    url
+  ])
+  assert.deepEqual(result.watchFiles, [url, pathToFileURL(join(pkgDir, 'more.js')).href])
 
   const calls = []
   const hook = new Hook(['wrap-pkg'], (exported, name, baseDir, format) => {
@@ -77,9 +122,8 @@ try {
   addHook(observer)
 
   const facadePath = join(dir, 'facade.mjs')
-  writeFileSync(facadePath, code)
   const facadeUrl = pathToFileURL(facadePath).href
-  const facade = await import(facadeUrl)
+  const facade = await importFacade(facadePath, result)
 
   assert.equal(facade.value(), 42)
   assert.equal(facade.more, 'more')
@@ -120,12 +164,11 @@ try {
     'd.js': "export function same () { return 'd' }\n"
   })
   const sameUrl = pathToFileURL(join(sameDir, 'index.js')).href
-  const sameCode = await createWrapperModule(options(sameUrl, 'same-pkg'))
+  const sameResult = await createWrapperModule(options(sameUrl, 'same-pkg'))
   const dUrl = pathToFileURL(join(sameDir, 'd.js')).href
-  assert.ok(sameCode.includes(`import * as __ns0 from ${JSON.stringify(dUrl)}`))
-  const sameFacadePath = join(dir, 'same-facade.mjs')
-  writeFileSync(sameFacadePath, sameCode)
-  const sameFacade = await import(pathToFileURL(sameFacadePath).href)
+  assert.ok(sameResult.code.includes('import * as __ns0 from "./__iitm_module_1__.js"'))
+  assert.deepEqual(sameResult.imports[2].target, { url: dUrl, format: 'module' })
+  const sameFacade = await importFacade(join(dir, 'same-facade.mjs'), sameResult)
   assert.equal(sameFacade.same(), 'd')
 
   const sameHook = new Hook(['same-pkg'], (exported) => {
@@ -142,9 +185,9 @@ try {
     builtinCalls.push({ name, baseDir, format })
     exported.once = () => 'hooked once'
   })
-  const builtinFacadePath = join(dir, 'events-facade.mjs')
-  writeFileSync(builtinFacadePath, createWrapperModule({ url: 'node:events', specifier: 'events', sync: true }))
-  const builtinFacade = await import(pathToFileURL(builtinFacadePath).href)
+  const builtinResult = createWrapperModule({ url: 'node:events', specifier: 'events', sync: true })
+  assert.equal(builtinResult.imports[1].external, true)
+  const builtinFacade = await importFacade(join(dir, 'events-facade.mjs'), builtinResult)
   assert.deepEqual(builtinCalls, [{ name: 'events', baseDir: undefined, format: 'builtin' }])
   assert.equal(builtinFacade.once(), 'hooked once')
   assert.equal(builtinFacade.default, events.default)

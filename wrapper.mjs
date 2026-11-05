@@ -1,8 +1,9 @@
 // EXPERIMENTAL: this entry point may change in minor versions.
 //
 // Generates the same ESM facade IITM's loaders generate, for a module the
-// caller selected, using the caller's source and resolve/load adapters. It
-// installs no loader hooks and shares no analysis state with them.
+// caller selected, using the caller's source and resolve/load adapters, plus a
+// manifest describing the facade's imports. It installs no loader hooks and
+// shares no analysis state with them.
 
 import Module from 'module'
 import { types } from 'util'
@@ -13,6 +14,10 @@ import { buildWrapperSource, processModule } from './lib/wrapper.mjs'
 
 const NAME = "'import-in-the-middle' createWrapperModule"
 const runtimeUrl = new URL('lib/register.js', import.meta.url).href
+// Facades import only these relative placeholders. Callers map them to real
+// modules through the returned `imports` manifest.
+const RUNTIME_SPECIFIER = './__iitm_runtime__.js'
+const MODULE_SPECIFIER_PREFIX = './__iitm_module_'
 
 function noop () {}
 
@@ -38,11 +43,6 @@ function isBuiltinUrl (url) {
   }
 }
 
-/** @param {string} url */
-function identity (url) {
-  return url
-}
-
 /** @param {unknown} value */
 function isThenable (value) {
   return value !== null &&
@@ -66,6 +66,17 @@ function assertNotThenable (value, adapter, target) {
 }
 
 /**
+ * @param {unknown} format
+ * @param {string} adapter
+ * @param {string} target
+ */
+function checkFormat (format, adapter, target) {
+  if (format != null && typeof format !== 'string') {
+    throw new TypeError(`${NAME}: ${adapter}() must return a string format for '${target}'`)
+  }
+}
+
+/**
  * @param {unknown} result
  * @param {string} specifier
  */
@@ -73,6 +84,7 @@ function checkResolved (result, specifier) {
   if (result === null || typeof result !== 'object' || typeof result.url !== 'string' || !isAbsoluteUrl(result.url)) {
     throw new TypeError(`${NAME}: resolve() must return an object with an absolute URL string as url for '${specifier}'`)
   }
+  checkFormat(result.format, 'resolve', specifier)
   return result
 }
 
@@ -86,6 +98,7 @@ function checkLoaded (result, url, resolvedFormat) {
     throw new TypeError(`${NAME}: load() must return an object for '${url}'`)
   }
   const { source, format } = result
+  checkFormat(format, 'load', url)
   if (source != null && typeof source !== 'string' && !types.isAnyArrayBuffer(source) && !ArrayBuffer.isView(source)) {
     throw new TypeError(`${NAME}: load() must return a string, ArrayBuffer or typed array source for '${url}'`)
   }
@@ -115,9 +128,18 @@ function isAbsoluteUrl (url) {
 }
 
 /**
+ * @param {string} url
+ * @param {string | undefined} format
+ */
+function isExternal (url, format) {
+  return url.startsWith('node:') || format === 'builtin'
+}
+
+/**
  * Validates options and builds the graph I/O for one call. Root source is
  * served from `options.source`, or analyzed as a builtin for a `node:` root;
- * builtins never reach the caller's `load`.
+ * builtins never reach the caller's `load`. The I/O also records, for this call
+ * only, the formats the adapters report and the files the facade depends on.
  *
  * @param {object} options
  * @param {boolean} sync
@@ -126,7 +148,7 @@ function prepare (options, sync) {
   if (options === null || typeof options !== 'object') {
     throw new TypeError(`${NAME}: options must be an object`)
   }
-  const { url, source, specifier, mapImport = identity } = options
+  const { url, source, specifier } = options
   let { resolve, load } = options
   if (options.sync !== undefined && typeof options.sync !== 'boolean') {
     throw new TypeError(`${NAME}: options.sync must be a boolean`)
@@ -150,23 +172,67 @@ function prepare (options, sync) {
   if (typeof specifier !== 'string') {
     throw new TypeError(`${NAME}: options.specifier must be a string`)
   }
-  for (const [name, value] of [['resolve', resolve], ['load', load], ['mapImport', mapImport]]) {
+  for (const [name, value] of [['resolve', resolve], ['load', load]]) {
     if (typeof value !== 'function') {
       throw new TypeError(`${NAME}: options.${name} must be a function`)
     }
   }
 
+  /** @type {Set<string>} */
+  const watchFiles = new Set()
+  // A format from load overrides one from resolve, regardless of call order.
+  // The first report per URL is kept, matching the per-call analysis cache.
+  /** @type {Map<string, string>} */
+  const loadedFormats = new Map()
+  /** @type {Map<string, string>} */
+  const resolvedFormats = new Map()
+
   /**
+   * @param {unknown} files
+   * @param {string} adapter
    * @param {string} target
-   * @param {'module' | 'runtime'} kind
    */
-  function mapSpecifier (target, kind) {
-    const mapped = mapImport(target, kind)
-    if (typeof mapped !== 'string' || mapped === '') {
-      if (isThenable(mapped)) mapped.then(noop, noop)
-      throw new TypeError(`${NAME}: mapImport() must synchronously return a non-empty string for '${target}'`)
+  function addWatchFiles (files, adapter, target) {
+    if (files === undefined) return
+    if (files === null || typeof files !== 'object' || typeof files[Symbol.iterator] !== 'function') {
+      throw new TypeError(`${NAME}: ${adapter}() must return watchFiles as an iterable of absolute URL strings for '${target}'`)
     }
-    return mapped
+    for (const file of files) {
+      if (typeof file !== 'string' || !isAbsoluteUrl(file)) {
+        throw new TypeError(`${NAME}: ${adapter}() returned a watchFiles entry that is not an absolute URL string for '${target}'`)
+      }
+      watchFiles.add(file)
+    }
+  }
+
+  /**
+   * @param {unknown} result
+   * @param {string} target
+   */
+  function recordResolved (result, target) {
+    const resolved = checkResolved(result, target)
+    addWatchFiles(resolved.watchFiles, 'resolve', target)
+    if (resolved.format != null && !resolvedFormats.has(resolved.url)) {
+      resolvedFormats.set(resolved.url, resolved.format)
+    }
+    return resolved
+  }
+
+  /**
+   * @param {unknown} result
+   * @param {string} target
+   * @param {string | undefined} resolvedFormat
+   */
+  function recordLoaded (result, target, resolvedFormat) {
+    const loaded = checkLoaded(result, target, resolvedFormat)
+    addWatchFiles(result.watchFiles, 'load', target)
+    if (loaded.format != null && !loadedFormats.has(target)) loadedFormats.set(target, loaded.format)
+    return loaded
+  }
+
+  /** @param {string} target */
+  function recordAnalyzed (target) {
+    if (target.startsWith('file:')) watchFiles.add(target)
   }
 
   /**
@@ -178,29 +244,32 @@ function prepare (options, sync) {
   }
 
   const root = builtin ? { source: null, format: 'builtin' } : { source, format: 'module' }
+  loadedFormats.set(url, root.format)
   const io = sync
     ? {
         resolve (target, context) {
           const result = resolve(target, { parentURL: context.parentURL, kind: context.kind ?? 'import' })
           assertNotThenable(result, 'resolve', target)
-          return checkResolved(result, target)
+          return recordResolved(result, target)
         },
         load (target, context) {
+          recordAnalyzed(target)
           if (target === url) return root
           if (isBuiltin(target, context)) return { source: null, format: 'builtin' }
           const result = load(target, { format: context.format })
           assertNotThenable(result, 'load', target)
-          return checkLoaded(result, target, context.format)
+          return recordLoaded(result, target, context.format)
         }
       }
     : {
         async resolve (target, context) {
-          return checkResolved(await resolve(target, { parentURL: context.parentURL, kind: context.kind ?? 'import' }), target)
+          return recordResolved(await resolve(target, { parentURL: context.parentURL, kind: context.kind ?? 'import' }), target)
         },
         async load (target, context) {
+          recordAnalyzed(target)
           if (target === url) return root
           if (isBuiltin(target, context)) return { source: null, format: 'builtin' }
-          return checkLoaded(await load(target, { format: context.format }), target, context.format)
+          return recordLoaded(await load(target, { format: context.format }), target, context.format)
         }
       }
 
@@ -208,8 +277,37 @@ function prepare (options, sync) {
     io,
     analysis: processModule({ srcUrl: url, context: { format: root.format }, state: createAnalysisState() }),
     render ({ bindings, format }) {
-      const runtime = mapSpecifier(runtimeUrl, 'runtime')
-      return buildWrapperSource(url, bindings, specifier, format, runtime, (target) => mapSpecifier(target, 'module'))
+      const imports = [{
+        specifier: RUNTIME_SPECIFIER,
+        kind: 'runtime',
+        target: { url: runtimeUrl, format: 'commonjs' },
+        external: false
+      }]
+      /** @type {Map<string, string>} */
+      const specifiers = new Map()
+
+      /** @param {string} target */
+      function mapModule (target) {
+        let placeholder = specifiers.get(target)
+        if (placeholder === undefined) {
+          placeholder = `${MODULE_SPECIFIER_PREFIX}${specifiers.size}__.js`
+          specifiers.set(target, placeholder)
+          const targetFormat = loadedFormats.get(target) ?? resolvedFormats.get(target) ??
+            (target.startsWith('node:') ? 'builtin' : undefined)
+          imports.push({
+            specifier: placeholder,
+            kind: 'module',
+            target: targetFormat === undefined ? { url: target } : { url: target, format: targetFormat },
+            external: isExternal(target, targetFormat)
+          })
+        }
+        return placeholder
+      }
+
+      // The wrapped module is always the first module placeholder.
+      mapModule(url)
+      const code = buildWrapperSource(url, bindings, specifier, format, RUNTIME_SPECIFIER, mapModule)
+      return { code, imports, watchFiles: Array.from(watchFiles), sideEffects: true }
     }
   }
 }
@@ -232,15 +330,17 @@ async function createWrapperModuleAsync (options) {
  * Generates an IITM-style ESM facade for a caller-selected ESM module, or for a
  * Node.js builtin given as a `node:` URL, without installing IITM's loader
  * hooks. The facade imports the original module and IITM's registration
- * runtime through `mapImport`, re-exports its bindings, and registers the
- * module with `Hook`/`addHook` under the canonical `url`.
+ * runtime through relative placeholder specifiers, re-exports its bindings, and
+ * registers the module with `Hook`/`addHook` under the canonical `url`.
  *
- * Returns a `Promise<string>` unless `sync` is `true`, in which case it returns
- * a `string` and requires `resolve`, `load` and `mapImport` to return
+ * Returns `{ code, imports, watchFiles, sideEffects: true }`, where `imports`
+ * maps each placeholder to its target and `watchFiles` lists the analyzed
+ * `file:` URLs and the adapters' watch files. The result is a Promise unless
+ * `sync` is `true`, which requires `resolve` and `load` to return
  * synchronously. The mode is chosen only by `sync`.
  *
  * @param {object} options See `wrapper.d.mts`.
- * @returns {string | Promise<string>}
+ * @returns {object | Promise<object>}
  */
 export function createWrapperModule (options) {
   return options !== null && typeof options === 'object' && options.sync === true

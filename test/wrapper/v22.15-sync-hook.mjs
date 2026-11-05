@@ -1,5 +1,6 @@
 // Executes facades produced by a small consumer-written synchronous adapter on
 // `module.registerHooks`, covering require(esm), file-path require and import.
+// The resolve hook maps each facade's placeholders through its manifest.
 
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -57,17 +58,22 @@ try {
     'index.js': 'await Promise.resolve()\nexport const x = 1\n'
   })
 
-  // The facade imports the original module through this suffix, which the
-  // hooks below serve unwrapped.
+  // The facade is served at the module's own URL, so its module placeholders
+  // resolve to this suffix, which the hooks below serve unwrapped.
   const ORIGINAL = '?iitm-original'
   const specifiers = new Map()
+  // Facade URL -> its placeholder manifest.
+  const manifests = new Map()
   const wraps = []
   let nextResolveForGraph
 
   nodeModule.registerHooks({
     resolve (specifier, context, nextResolve) {
-      if (specifier.endsWith(ORIGINAL)) {
-        return { url: specifier, format: 'module', shortCircuit: true }
+      const entry = manifests.get(context.parentURL)?.find((entry) => entry.specifier === specifier)
+      if (entry !== undefined) {
+        const { kind, external, target } = entry
+        const url = kind === 'module' && !external ? target.url + ORIGINAL : target.url
+        return { url, format: target.format, shortCircuit: true }
       }
       nextResolveForGraph = nextResolve
       const result = nextResolve(specifier, context)
@@ -85,7 +91,7 @@ try {
       // Classify by the loaded format, not by the require/import conditions.
       if (!/\/node_modules\/sync-(pkg|tla)\//.test(url) || result.format !== 'module') return result
 
-      const code = createWrapperModule({
+      const { code, imports, watchFiles, sideEffects } = createWrapperModule({
         url,
         source: sourceOf(result, url),
         specifier: specifiers.get(url) ?? url,
@@ -98,10 +104,12 @@ try {
         load (u, { format }) {
           const loaded = nextLoad(u, { format, importAttributes: {} })
           return { source: sourceOf(loaded, u), format: loaded.format }
-        },
-        mapImport: (u, kind) => kind === 'runtime' ? u : u + ORIGINAL
+        }
       })
       assert.equal(typeof code, 'string')
+      assert.equal(sideEffects, true)
+      assert.equal(watchFiles[0], url)
+      manifests.set(url, imports)
       wraps.push(url)
       return { format: 'module', source: code, shortCircuit: true }
     }

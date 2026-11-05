@@ -278,26 +278,25 @@ unchanged.
 import { createWrapperModule } from 'import-in-the-middle/wrapper.mjs'
 
 // Build time: adapters may return values or Promises.
-const code = await createWrapperModule({
+const { code, imports, watchFiles, sideEffects } = await createWrapperModule({
   url, // canonical URL, e.g. 'file:///app/node_modules/pkg/index.js'
   source, // that module's ESM JavaScript source
   specifier, // e.g. 'pkg'
-  resolve, // (specifier, { parentURL, kind }) => { url, format? }
-  load, // (url, { format }) => { source, format? }
-  mapImport // (url, kind) => specifier emitted in the facade
+  resolve, // (specifier, { parentURL, kind }) => { url, format?, watchFiles? }
+  load // (url, { format }) => { source, format?, watchFiles? }
 })
 
 // Inside a synchronous hook: adapters must return synchronously.
-const codeSync = createWrapperModule({ url, source, specifier, resolve, load, mapImport, sync: true })
+const wrapper = createWrapperModule({ url, source, specifier, resolve, load, sync: true })
 
 // A builtin: no source, and no adapters are needed.
-const http = createWrapperModule({ url: 'node:http', specifier: 'http', mapImport, sync: true })
+const http = createWrapperModule({ url: 'node:http', specifier: 'http', sync: true })
 ```
 
 **Execution mode.** Without `sync`, or with `sync: false`, the function returns a
-`Promise<string>`, and invalid options or adapter failures reject it. With
-`sync: true` it returns a `string`, and `resolve`, `load` and `mapImport` must
-return synchronously. A Promise returned by an adapter throws a `TypeError`, and
+Promise of the [result](#result), and invalid options or adapter failures
+reject it. With `sync: true` it returns the result itself, and `resolve` and
+`load` must return synchronously. A Promise returned by an adapter throws a `TypeError`, and
 IITM observes that Promise so it is not reported as an unhandled rejection. The
 mode is chosen only by `sync`, never by what the adapters return.
 
@@ -310,8 +309,8 @@ a valid module.
 **Builtin root.** A Node.js builtin is wrapped by passing its `node:` URL
 (`node:fs`, not `fs`) and omitting `source`. Its export names come from the
 builtin itself, and `resolve` and `load` are optional because they are never
-called. The facade imports the builtin through `mapImport(url, 'module')` and
-registers it with the format `builtin`, as the loader does. A `node:` URL that
+called. The facade imports the builtin through an `external` module entry of
+the manifest and registers it with the format `builtin`, as the loader does. A `node:` URL that
 is not a builtin, or one given together with `source`, is a `TypeError`.
 
 **Graph adapters.** `resolve` and `load` are only used to discover exports
@@ -325,44 +324,124 @@ re-exported from other modules:
   by converting `file:` URLs to paths. For `kind: 'require'`, the specifier
   arrives as written, including `#imports`, and `resolve` is also called for
   `.json` and `.node` targets, which are then skipped without reaching `load`.
-  Return `{ url, format? }`, where `url` is an absolute URL. Use a `node:` URL
-  for builtins.
+  Return `{ url, format?, watchFiles? }`, where `url` is an absolute URL. Use a
+  `node:` URL for builtins.
 * Relative `export * from` specifiers are joined against the declaring
   module's URL, so `url` and resolved URLs of modules with relative re-exports
   must be hierarchical, such as `file:` URLs. A URL like `virtual:entry` cannot
   serve as the base of `./dep.js`.
-* `load(url, { format })` returns `{ source, format? }`, where `source` is a
-  string, `ArrayBuffer` or typed array. Builtins and the root never reach `load`,
+* `load(url, { format })` returns `{ source, format?, watchFiles? }`, where
+  `source` is a string, `ArrayBuffer` or typed array. Builtins and the root never reach `load`,
   so returning `format: 'builtin'` from it is an error.
   Its `format` overrides the one from `resolve`; when omitted, the resolved
   format is retained. Only when neither adapter supplies a format is a module
   with ESM syntax analyzed as ESM and anything else as CommonJS.
+* `watchFiles`, on either result, lists extra files the facade depends on,
+  such as a `package.json` consulted while resolving, as an iterable of
+  absolute URL strings. A string, a non-iterable or a relative entry is a
+  `TypeError`.
+* A `format`, when given, must be a string.
 * IITM performs no filesystem reads or CommonJS resolution of its own here. A
-  `load` result without source is an error. Adapters may cache, and may record
-  watch dependencies, inside their callbacks.
+  `load` result without source is an error. Adapters may cache inside their
+  callbacks.
 
-**Import mapping.** `mapImport(url, kind)` returns the specifier the facade
-imports, and IITM escapes it. It is called synchronously in both modes, possibly
-more than once for the same URL, so it must be deterministic.
+<a id="result"></a>
+**Result.** The function returns `{ code, imports, watchFiles, sideEffects: true }`:
 
-* `kind: 'module'` targets a module the facade reads bindings from: the wrapped
-  module, or the defining module of a re-exported name. The returned specifier
-  must load the **original, unwrapped** module.
+```js
+{
+  code: 'import { register, ModuleBinder } from "./__iitm_runtime__.js"\n' +
+    'import * as namespace from "./__iitm_module_0__.js"\n...',
+  imports: [
+    {
+      specifier: './__iitm_runtime__.js',
+      kind: 'runtime',
+      target: { url: 'file:///app/node_modules/import-in-the-middle/lib/register.js', format: 'commonjs' },
+      external: false
+    },
+    {
+      specifier: './__iitm_module_0__.js',
+      kind: 'module',
+      target: { url: 'file:///app/node_modules/pkg/index.js', format: 'module' },
+      external: false
+    }
+  ],
+  watchFiles: ['file:///app/node_modules/pkg/index.js', 'file:///app/node_modules/pkg/more.js'],
+  sideEffects: true
+}
+```
+
+* `code` imports only the relative placeholders listed in `imports`. They are
+  deterministic: `./__iitm_runtime__.js`, then `./__iitm_module_<n>__.js`
+  numbered from `0` in the order the facade first uses each target.
+  **`./__iitm_module_0__.js` (`imports[1]`) is always the wrapped module
+  itself**, whose `target.url` equals `url`. Two facades use the same
+  placeholders, so resolve them per importing facade. `code` is not
+  self-contained: a caller that caches it must cache `imports` with it.
+* Each `imports` entry maps a placeholder to its `target`: the canonical `url`
+  and, when known, the `format` (`load`'s, else `resolve`'s, `builtin` for
+  `node:` URLs, `commonjs` for the runtime). `external` is `true` for builtins.
+  Resolving each placeholder is the caller's job: a bundler serves `code` as a
+  virtual module and maps placeholders in its resolve hook, and a
+  `module.registerHooks()` hook does the same keyed by `parentURL`. Filesystem
+  paths, virtual IDs, external modules and cache invalidation stay with the
+  caller.
+* `kind: 'module'` targets a module the facade reads bindings from:
+  * The **wrapped module** (`./__iitm_module_0__.js`) must load the original,
+    unwrapped module, never the facade, or the facade imports itself. A loader
+    serving the facade at `url` resolves it to an alias that bypasses the facade
+    (for example `${url}?original`).
+  * **Any other module entry** is the defining module of a re-exported name.
+    Resolve it normally, to the same instance the wrapped module's own
+    `export *` chain uses, as IITM's loader does. Routing it to a separate
+    "original" copy evaluates that module twice.
+  * In a bundler, give the **facade** its own ID or namespace and leave the
+    original at its normal ID. The reverse, moving the original to a separate
+    namespace, loads a second copy whenever an import of the wrapped file that
+    your plugin does not route itself (a self-import, a relative or a deep
+    import) reaches the normal ID.
 * `kind: 'runtime'` targets IITM's registration runtime (`lib/register.js` of
-  this copy, as a `file:` URL of its real path). The returned specifier must
-  load the **same instance** that your `Hook`/`addHook` calls use. If your tool
-  keeps symlinked paths (for example esbuild's `preserveSymlinks`), map this URL
-  to the path your `import-in-the-middle` import resolves to. The URL is
-  computed from the location of `wrapper.mjs`, so keep `import-in-the-middle`
-  external when bundling the tool that calls `createWrapperModule`.
+  this copy, as a `file:` URL of its real path, CommonJS). It must load the
+  **same instance** that your `Hook`/`addHook` calls use. If your tool keeps
+  symlinked paths (for example esbuild's `preserveSymlinks`), resolve it to the
+  path your `import-in-the-middle` import resolves to. The URL is computed from
+  the location of `wrapper.mjs`, so keep `import-in-the-middle` external when
+  bundling the tool that calls `createWrapperModule`.
+* `watchFiles` lists, deduplicated in first-seen order, every `file:` module
+  analyzed (the root first, unless it is a builtin or not a `file:` URL) and the
+  adapters' `watchFiles`. Each call collects its own. Because the facade's
+  export list depends on modules it never imports, such as the targets of
+  `export *` chains, add these as watch dependencies so a rebuild picks up
+  changed exports. Files your adapters consult on their own, such as a
+  `package.json` read to decide between ESM and CommonJS, are only included if
+  the adapters report them in `watchFiles`.
+* `sideEffects: true` marks the facade as having side effects: evaluating it
+  registers the module, so a bundler must not tree-shake it away.
 
-The mapping changes only the emitted imports. Registration, and therefore hook
-matching, always uses `url`, and re-exports are resolved from the canonical
-URLs. The default mapping emits the canonical URLs unchanged. **That default
-cannot be used to replace the original module at its own URL:** the facade
-would import itself. A loader serving the facade at `url` must map
-`kind: 'module'` to an alias that bypasses it (for example `${url}?original`),
-and a bundler must map it to the real file outside its facade namespace.
+Registration, and therefore hook matching, always uses `url`. Placeholders
+change only the emitted imports.
+
+```js
+// Sketch of a bundler plugin resolving the placeholders of a facade it serves
+// under its own ID (for example in a separate namespace).
+const wrapper = await createWrapperModule({ url, source, specifier, resolve, load })
+facades.set(facadeId, { url, imports: wrapper.imports })
+for (const file of wrapper.watchFiles) addWatchFile(fileURLToPath(file))
+
+function resolvePlaceholder (specifier, importer) {
+  const facade = facades.get(importer)
+  const entry = facade?.imports.find((entry) => entry.specifier === specifier)
+  if (entry === undefined) return undefined
+  const { kind, target, external } = entry
+  if (external) return { id: target.url, external: true }
+  if (kind === 'module' && target.url === facade.url) {
+    // The wrapped module: its normal ID, marked so the plugin does not wrap it again.
+    return { id: fileURLToPath(target.url), skipWrapping: true }
+  }
+  // Other modules and the runtime: their normal IDs, handled as usual.
+  return { id: fileURLToPath(target.url) }
+}
+```
 
 **Runtime registry.** Facades and `Hook`/`addHook` must share one copy of
 `import-in-the-middle`, either consistently bundled and deduplicated or

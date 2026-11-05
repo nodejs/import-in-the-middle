@@ -24,6 +24,11 @@ export type WrapperResolveResult = {
   url: string
   /** Loader format (`module`, `commonjs`, `builtin`, ...), used unless `load` overrides it. */
   format?: string
+  /**
+   * Extra files the facade depends on (for example a `package.json` consulted
+   * during resolution), as absolute URLs. Added to {@link WrapperModule.watchFiles}.
+   */
+  watchFiles?: Iterable<string>
 }
 
 /** Context passed to {@link CreateWrapperModuleOptions.load}. */
@@ -42,30 +47,67 @@ export type WrapperLoadResult = {
    * reach `load`, so `builtin` is rejected.
    */
   format?: string
+  /**
+   * Extra files the facade depends on, as absolute URLs. Added to
+   * {@link WrapperModule.watchFiles}.
+   */
+  watchFiles?: Iterable<string>
+}
+
+/** A module the facade imports, identified by its canonical URL. */
+export type WrapperModuleTarget = {
+  /** Canonical absolute URL: a resolved module URL, a `node:` URL or IITM's runtime. */
+  url: string
+  /** Loader format reported by the adapters, `builtin` for builtins, `commonjs` for the runtime. */
+  format?: string
 }
 
 /**
- * Maps a canonical URL to the specifier the facade imports.
+ * One import of the generated facade. The facade imports only `specifier`, a
+ * relative placeholder; the caller resolves it to `target`.
  *
- * - `module`: a module the facade reads bindings from (the wrapped module, or
- *   the defining module of a re-exported name). It must load the original,
- *   unwrapped module; returning a specifier that resolves back to the facade
- *   makes the facade import itself.
+ * - `module`: a module the facade reads bindings from. The first one
+ *   (`./__iitm_module_0__.js`, whose `target.url` is the wrapped `url`) is the
+ *   wrapped module: it must load the original, unwrapped module, since
+ *   resolving it back to the facade makes the facade import itself. Any other
+ *   is the defining module of a re-exported name: resolve it normally, to the
+ *   instance the wrapped module's own `export *` chain uses, or it is
+ *   evaluated twice.
  * - `runtime`: IITM's registration runtime (`lib/register.js` of this copy).
  *   It must load the same instance that `Hook`/`addHook` use. Its URL is
  *   computed from the location of `wrapper.mjs`, so keep
  *   `import-in-the-middle` external when bundling the calling tool.
- *
- * Called synchronously while generating the facade, possibly more than once for
- * the same URL; it must be deterministic. The returned string is escaped by IITM.
  */
-export type WrapperMapImport = (url: string, kind: 'module' | 'runtime') => string
+export type WrapperImport = {
+  /** Placeholder emitted in `code`, such as `./__iitm_module_0__.js`. */
+  specifier: string
+  kind: 'module' | 'runtime'
+  target: WrapperModuleTarget
+  /** `true` for builtins, which a bundler should leave external. */
+  external: boolean
+}
+
+/** The generated facade and what a caller needs to resolve and rebuild it. */
+export type WrapperModule = {
+  /** ESM source of the facade, importing only the placeholders in `imports`. */
+  code: string
+  /**
+   * One entry per placeholder, the runtime first, then the wrapped module.
+   * `code` is not self-contained: cache `imports` together with it.
+   */
+  imports: WrapperImport[]
+  /**
+   * Deduplicated absolute URLs whose change can change `code`: every analyzed
+   * `file:` module, including the root, plus the adapters' `watchFiles`.
+   */
+  watchFiles: string[]
+  /** The facade registers the module with `Hook`/`addHook` when evaluated. */
+  sideEffects: true
+}
 
 type CreateWrapperModuleBaseOptions = {
   /** The specifier the module was imported by, reported to hooks. */
   specifier: string
-  /** Defaults to the identity mapping. See {@link WrapperMapImport}. */
-  mapImport?: WrapperMapImport
 }
 
 type WrapperSyncAdapters = {
@@ -85,7 +127,7 @@ type WrapperRoot<Adapters> =
        * Canonical URL of the wrapped module: its registration identity for
        * `Hook`/`addHook` and the base for resolving its re-exports, so it must
        * be hierarchical (such as `file:`) when the module has relative
-       * re-exports. Not changed by `mapImport`.
+       * re-exports. The facade's placeholders never change it.
        */
       url: string
       /**
@@ -125,20 +167,20 @@ export type CreateWrapperModuleOptions = CreateWrapperModuleBaseOptions & {
  * Generates an IITM-style ESM facade for a caller-selected ESM module, using
  * caller-provided source and module-graph access, or for a Node.js builtin
  * given as a `node:` URL, without installing IITM's loader hooks. The facade
- * imports the original module and the registration runtime through
- * `mapImport`, re-exports the module's bindings, and registers it with
- * `Hook`/`addHook` under `url`.
+ * imports the original module and the registration runtime through relative
+ * placeholders listed in `imports`, re-exports the module's bindings, and
+ * registers it with `Hook`/`addHook` under `url`.
  *
- * Returns a `Promise<string>` by default. With `sync: true` it returns a
- * `string` and every adapter must return synchronously; a Promise from an
- * adapter throws a `TypeError`.
+ * Returns a `Promise<WrapperModule>` by default. With `sync: true` it returns a
+ * `WrapperModule` and every adapter must return synchronously; a Promise from
+ * an adapter throws a `TypeError`.
  *
  * ```js
- * const code = await createWrapperModule({ url, source, specifier, resolve, load, mapImport })
- * const codeSync = createWrapperModule({ url, source, specifier, resolve, load, mapImport, sync: true })
+ * const { code, imports, watchFiles } = await createWrapperModule({ url, source, specifier, resolve, load })
+ * const wrapperSync = createWrapperModule({ url, source, specifier, resolve, load, sync: true })
  * const builtin = createWrapperModule({ url: 'node:http', specifier: 'http', sync: true })
  * ```
  */
-export declare function createWrapperModule (options: CreateWrapperModuleSyncOptions): string
-export declare function createWrapperModule (options: CreateWrapperModuleAsyncOptions): Promise<string>
-export declare function createWrapperModule (options: CreateWrapperModuleOptions): string | Promise<string>
+export declare function createWrapperModule (options: CreateWrapperModuleSyncOptions): WrapperModule
+export declare function createWrapperModule (options: CreateWrapperModuleAsyncOptions): Promise<WrapperModule>
+export declare function createWrapperModule (options: CreateWrapperModuleOptions): WrapperModule | Promise<WrapperModule>
