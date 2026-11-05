@@ -384,7 +384,9 @@ module's bindings. As with the loader, exports replaced by a hook are visible
 through the facade, while later reassignments inside the original module are
 only partially reflected. Code that reaches the original module directly, for
 example through the alias, bypasses the facade, and an aliased original sees the
-alias as its `import.meta.url`. Export names of builtins and of CommonJS modules
+alias as its `import.meta.url`. The loader's handling of circular
+`export *` graphs, which rewrites the modules that close the cycle, is not
+applied: the facade is generated as for an acyclic graph. Export names of builtins and of CommonJS modules
 are computed by the Node.js runtime that runs `createWrapperModule`, which may
 differ from the runtime the output targets. A name that the target runtime
 lacks is still exported by the facade, with the value `undefined`.
@@ -403,4 +405,6 @@ lacks is still exported by the facade, with the value `undefined`.
   not supported and will be instrumented with the export set from its first
   load. Idempotent transforms (type stripping, AST instrumentation, minifiers)
   are unaffected, and the actual module still executes the source its real load
-  returns; only the interceptable export *names* are memoized.
+  returns.
+* A module's static imports and their resolved URLs must remain stable.
+  The cycle detector caches import metadata by module URL.

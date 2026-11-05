@@ -48,3 +48,14 @@ loads reporting code from the default branch, validates the artifact's source
 and samples, and computes its own statistics before updating the bot comment.
 The PR controls benchmark execution. Artifact validation does not attest to the
 accuracy of its timings.
+
+The acyclic-barrel sampler measures synchronous loading when leaf modules import
+a shared helper. It reports startup wall time, CPU time, and retained heap after
+GC. Use `node --expose-gc benchmark/acyclic-barrels.mjs <package-directory>
+[active|inactive|excluded] [leaf-count] [shared-leaf-count]`. Run both revisions in fresh processes
+and alternate their order. The inactive mode registers the loader without a
+Hook callback. The excluded mode leaves the graph unwrapped. This sampler uses
+an in-memory upstream loader to expose compilation and binding costs without
+filesystem reads. The shared leaf count adds dependencies behind the helper to
+expose repeated traversal of the same graph. Its heap result includes the
+library and its module caches.
