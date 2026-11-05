@@ -8,8 +8,11 @@ import path from 'path'
 
 const filename = process.env.IITM_TEST_FILE || ''
 
+// `wrapper.mjs` tests generate and run facades without IITM's loader.
+const isWrapperTest = filename.includes(`${path.sep}wrapper${path.sep}`)
+
 const selected =
-  filename.includes('disabled') || filename.includes('register')
+  filename.includes('disabled') || filename.includes('register') || isWrapperTest
     ? {}
     : (path.extname(filename).slice(-2) === 'ts' ? tsLoader : regularLoader)
 
