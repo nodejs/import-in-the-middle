@@ -73,9 +73,10 @@ export function formatReports (reports) {
       '| --- | ---: | ---: | ---: | ---: | ---: |')
     for (const benchmark of report.benchmarks) {
       const result = compare(benchmark.trials)
-      const change = result.stable
-        ? `${result.changePercent >= 0 ? '+' : ''}${result.changePercent.toFixed(2)}%`
-        : 'Unstable'
+      let change = 'Unstable'
+      if (result.stable) {
+        change = `${result.changePercent >= 0 ? '+' : ''}${result.changePercent.toFixed(2)}%`
+      }
       lines.push(`| ${benchmark.name} | ${result.base.median.toFixed(2)} / ${result.base.p95.toFixed(2)} ms | ` +
         `${result.head.median.toFixed(2)} / ${result.head.p95.toFixed(2)} ms | ${change} | ` +
         `${result.ratioCvPercent.toFixed(2)}% | ` +

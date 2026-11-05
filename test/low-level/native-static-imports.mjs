@@ -30,12 +30,15 @@ for (const [index, encode] of variants.entries()) {
       format: url === helper ? [undefined, 'module', 'module-typescript', 'commonjs'][index] : 'module'
     })
     /** @param {string} url */
-    const load = url => ({
-      format: 'module',
-      source: encode(url === root
-        ? `export * from '${leaf}'`
-        : url === helper ? 'export {}' : `import '${root}'; import '${helper}'; export const value = 1`)
-    })
+    const load = url => {
+      let source = `import '${root}'; import '${helper}'; export const value = 1`
+      if (url === root) {
+        source = `export * from '${leaf}'`
+      } else if (url === helper) {
+        source = 'export {}'
+      }
+      return { format: 'module', source: encode(source) }
+    }
     const resolveHook = mode === 'sync' ? hook.resolveSync : hook.resolve
     const loadHook = mode === 'sync' ? hook.loadSync : hook.load
     const wrapper = await resolveHook(root, { parentURL: 'file:///native-entry.mjs' }, resolve)

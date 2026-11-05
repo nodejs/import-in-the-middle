@@ -24,9 +24,7 @@ function normalizeLoad (url, result) {
     result.source !== null &&
     result.format === 'module'
   ) {
-    const source = typeof result.source === 'string'
-      ? result.source
-      : textDecoder.decode(result.source)
+    const source = typeof result.source === 'string' ? result.source : textDecoder.decode(result.source)
     return {
       ...result,
       source: stripTypeScriptTypes(source, { mode: 'strip' })

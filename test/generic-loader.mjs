@@ -8,10 +8,12 @@ import path from 'path'
 
 const filename = process.env.IITM_TEST_FILE || ''
 
-const selected =
-  filename.includes('disabled') || filename.includes('register')
-    ? {}
-    : (path.extname(filename).slice(-2) === 'ts' ? tsLoader : regularLoader)
+let selected
+if (filename.includes('disabled') || filename.includes('register')) {
+  selected = {}
+} else {
+  selected = path.extname(filename).slice(-2) === 'ts' ? tsLoader : regularLoader
+}
 
 // During tests we don't want IITM to wrap its own implementation files, because
 // that makes c8 attribute coverage to the generated wrapper source instead of

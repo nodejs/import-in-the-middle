@@ -46,9 +46,8 @@ module.registerHooks({
    * @param {(specifier: string, context?: Partial<import('node:module').ResolveHookContext>) => import('node:module').ResolveFnOutput} nextResolve
    */
   resolve (specifier, context, nextResolve) {
-    return sources.has(specifier)
-      ? { url: specifier, format: 'module', shortCircuit: true }
-      : nextResolve(specifier, context)
+    if (sources.has(specifier)) return { url: specifier, format: 'module', shortCircuit: true }
+    return nextResolve(specifier, context)
   },
   /**
    * @param {string} url
@@ -56,9 +55,8 @@ module.registerHooks({
    * @param {(url: string, context?: Partial<import('node:module').LoadHookContext>) => import('node:module').LoadFnOutput} nextLoad
    */
   load (url, context, nextLoad) {
-    return sources.has(url)
-      ? { source: sources.get(url), format: 'module', shortCircuit: true }
-      : nextLoad(url, context)
+    if (sources.has(url)) return { source: sources.get(url), format: 'module', shortCircuit: true }
+    return nextLoad(url, context)
   }
 })
 

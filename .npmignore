@@ -5,6 +5,7 @@ node_modules
 coverage
 .editorconfig
 .eslintrc.yaml
+tools
 .release-please-manifest.json
 release-please-config.json
 tsconfig.json

@@ -13,11 +13,27 @@ parserOptions:
 
 rules:
   "import/first": off
+  "no-multiline-ternary": error
+  "sonarjs/arguments-order": error
+  "sonarjs/comma-or-logical-or-case": error
+  "sonarjs/inverted-assertion-arguments": error
+  "sonarjs/no-all-duplicated-branches": error
+  "sonarjs/no-code-after-done": error
+  "sonarjs/no-collection-size-mischeck": error
+  "sonarjs/no-identical-conditions": error
+  "sonarjs/no-nested-assignment": error
+  "sonarjs/no-unthrown-error": error
+  "sonarjs/reduce-initial-value": error
+
+plugins:
+  - sonarjs
 
 extends:
   - "standard"
 
 ignorePatterns:
+  - coverage/
+  - test/fixtures/test-nextjs-app/.next/
   - test/fixtures/circular-a.js
   - test/fixtures/circular-b.js
   - test/fixtures/circular-star-a.mjs
