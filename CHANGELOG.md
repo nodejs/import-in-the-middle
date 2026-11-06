@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.6.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.5.3...import-in-the-middle-v3.6.0) (2026-11-06)
+
+
+### Features
+
+* **hooks:** expose module format to callbacks ([#308](https://github.com/nodejs/import-in-the-middle/issues/308)) ([48222b0](https://github.com/nodejs/import-in-the-middle/commit/48222b03f40f11c769154563c23ee3cd88713972))
+
+
+### Bug Fixes
+
+* **benchmark:** silence DEP0205 deprecation warning ([#314](https://github.com/nodejs/import-in-the-middle/issues/314)) ([a734cb3](https://github.com/nodejs/import-in-the-middle/commit/a734cb39e7d5fae5ad30ad16adac3b0c3dedfac2))
+* **esm:** preserve circular re-export initialization ([#291](https://github.com/nodejs/import-in-the-middle/issues/291)) ([3a59330](https://github.com/nodejs/import-in-the-middle/commit/3a59330e7ed5bafab603a4bddce1b4d4e8786578))
+* **esm:** preserve circular star export values ([#315](https://github.com/nodejs/import-in-the-middle/issues/315)) ([72561ad](https://github.com/nodejs/import-in-the-middle/commit/72561ada958443a408442fdded0b318011d69124))
+* **types:** resolve synchronous hook declarations ([#311](https://github.com/nodejs/import-in-the-middle/issues/311)) ([581f9ee](https://github.com/nodejs/import-in-the-middle/commit/581f9ee436fc38743fc301523020c064baaca798))
+
+
+### Performance Improvements
+
+* **hooks:** resolve module details once per load ([#313](https://github.com/nodejs/import-in-the-middle/issues/313)) ([45a89b8](https://github.com/nodejs/import-in-the-middle/commit/45a89b83cff9b205187c93c9ed804930bae8eeb3))
+
 ## [3.5.3](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.5.2...import-in-the-middle-v3.5.3) (2026-10-22)
 
 
