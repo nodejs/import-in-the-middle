@@ -21,7 +21,6 @@ export function resolve (specifier, context, nextResolve) {
  * @param {import('node:module').LoadHook} nextLoad
  */
 export function load (url, context, nextLoad) {
-  return sources.has(url)
-    ? { source: sources.get(url), format: 'module', shortCircuit: true }
-    : nextLoad(url, context)
+  if (sources.has(url)) return { source: sources.get(url), format: 'module', shortCircuit: true }
+  return nextLoad(url, context)
 }

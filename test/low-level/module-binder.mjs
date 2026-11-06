@@ -147,19 +147,66 @@ function interceptTimeouts () {
 
 // Exhausting every retry releases the pending updater and later flushes stay
 // inactive, even if the source eventually gets a value.
-{
+for (const temporalDeadZone of [false, true]) {
   const { callbacks, restore } = interceptTimeouts()
   try {
-    const source = {}
+    let initialized = false
+    const source = {
+      get foo () {
+        if (temporalDeadZone && !initialized) throw new ReferenceError('tdz')
+        return initialized ? 13 : undefined
+      }
+    }
     const { binder, slot } = makeBinder(source)
     binder.flush()
     await Promise.resolve()
     while (callbacks.length > 0) callbacks.shift()()
 
-    source.foo = 13
+    initialized = true
+    makeBinder({})
     binder.flush()
     await Promise.resolve()
     strictEqual(slot.value, undefined, 'exhausted updater is not retried')
+  } finally {
+    restore()
+  }
+}
+
+{
+  const { restore } = interceptTimeouts()
+  try {
+    let initialized = false
+    let reads = 0
+    const source = {
+      get foo () {
+        reads++
+        if (!initialized) throw new ReferenceError('tdz')
+        return 13
+      }
+    }
+    const { binder, slot } = makeBinder(source)
+    reads = 0
+    new ModuleBinder(source).flush()
+    new ModuleBinder(source, []).flush()
+    const ready = makeBinder({ foo: 42 })
+    const alternate = makeBinder(source, 'foo', [{ foo: 7 }])
+    strictEqual(reads, 0, 'initialized and empty wrappers do not retry unrelated pending exports')
+    strictEqual(ready.slot.value, 42)
+    strictEqual(alternate.slot.value, 7)
+    throws(() => makeBinder({ get foo () { throw new TypeError('boom') } }), {
+      name: 'TypeError',
+      message: 'boom'
+    })
+    const deferred = makeBinder(source)
+    strictEqual(deferred.slot.value, undefined)
+
+    initialized = true
+    makeBinder({ foo: undefined })
+    strictEqual(slot.value, 13, 'a wrapper with an undefined export retries pending circular bindings')
+    strictEqual(deferred.slot.value, 13)
+    binder.flush()
+    deferred.binder.flush()
+    await Promise.resolve()
   } finally {
     restore()
   }

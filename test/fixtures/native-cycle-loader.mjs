@@ -22,9 +22,8 @@ export function initialize (data) {
  * @param {import('node:module').ResolveHook} nextResolve
  */
 export function resolve (specifier, context, nextResolve) {
-  return sources.has(specifier)
-    ? { url: specifier, format: 'module', shortCircuit: true }
-    : nextResolve(specifier, context)
+  if (sources.has(specifier)) return { url: specifier, format: 'module', shortCircuit: true }
+  return nextResolve(specifier, context)
 }
 
 /**

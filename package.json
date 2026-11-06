@@ -13,8 +13,9 @@
     "coverage": "c8 --reporter html imhotap --files test/{hook,low-level,other,get-esm-exports,register,wrapper}/* && echo \"\nNow open coverage/index.html\n\"",
     "benchmark": "node benchmark/run.mjs",
     "test:benchmark": "node test/benchmark.mjs",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint": "eslint . --rulesdir tools/eslint && npm run test:lint",
+    "lint:fix": "eslint . --rulesdir tools/eslint --fix",
+    "test:lint": "node test/lint/readability.mjs"
   },
   "repository": {
     "type": "git",
@@ -53,6 +54,7 @@
     "eslint-plugin-n": "^16.6.2",
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^6.6.0",
+    "eslint-plugin-sonarjs": "^4.2.2",
     "got": "^14.6.6",
     "imhotap": "^2.2.0",
     "openai": "4.47.2",

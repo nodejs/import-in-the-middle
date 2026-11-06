@@ -245,33 +245,36 @@ function prepare (options, sync) {
 
   const root = builtin ? { source: null, format: 'builtin' } : { source, format: 'module' }
   loadedFormats.set(url, root.format)
-  const io = sync
-    ? {
-        resolve (target, context) {
-          const result = resolve(target, { parentURL: context.parentURL, kind: context.kind ?? 'import' })
-          assertNotThenable(result, 'resolve', target)
-          return recordResolved(result, target)
-        },
-        load (target, context) {
-          recordAnalyzed(target)
-          if (target === url) return root
-          if (isBuiltin(target, context)) return { source: null, format: 'builtin' }
-          const result = load(target, { format: context.format })
-          assertNotThenable(result, 'load', target)
-          return recordLoaded(result, target, context.format)
-        }
+  let io
+  if (sync) {
+    io = {
+      resolve (target, context) {
+        const result = resolve(target, { parentURL: context.parentURL, kind: context.kind ?? 'import' })
+        assertNotThenable(result, 'resolve', target)
+        return recordResolved(result, target)
+      },
+      load (target, context) {
+        recordAnalyzed(target)
+        if (target === url) return root
+        if (isBuiltin(target, context)) return { source: null, format: 'builtin' }
+        const result = load(target, { format: context.format })
+        assertNotThenable(result, 'load', target)
+        return recordLoaded(result, target, context.format)
       }
-    : {
-        async resolve (target, context) {
-          return recordResolved(await resolve(target, { parentURL: context.parentURL, kind: context.kind ?? 'import' }), target)
-        },
-        async load (target, context) {
-          recordAnalyzed(target)
-          if (target === url) return root
-          if (isBuiltin(target, context)) return { source: null, format: 'builtin' }
-          return recordLoaded(await load(target, { format: context.format }), target, context.format)
-        }
+    }
+  } else {
+    io = {
+      async resolve (target, context) {
+        return recordResolved(await resolve(target, { parentURL: context.parentURL, kind: context.kind ?? 'import' }), target)
+      },
+      async load (target, context) {
+        recordAnalyzed(target)
+        if (target === url) return root
+        if (isBuiltin(target, context)) return { source: null, format: 'builtin' }
+        return recordLoaded(await load(target, { format: context.format }), target, context.format)
       }
+    }
+  }
 
   return {
     io,
@@ -343,7 +346,8 @@ async function createWrapperModuleAsync (options) {
  * @returns {object | Promise<object>}
  */
 export function createWrapperModule (options) {
-  return options !== null && typeof options === 'object' && options.sync === true
-    ? createWrapperModuleSync(options)
-    : createWrapperModuleAsync(options)
+  if (options !== null && typeof options === 'object' && options.sync === true) {
+    return createWrapperModuleSync(options)
+  }
+  return createWrapperModuleAsync(options)
 }

@@ -3,9 +3,10 @@
  * @param {import('node:module').LoadFnOutput} result
  */
 function withIgnoredSource (url, result) {
-  return result.format === 'builtin'
-    ? { ...result, source: url === 'node:fs' ? '' : 'export const fake = true' }
-    : result
+  if (result.format === 'builtin') {
+    return { ...result, source: url === 'node:fs' ? '' : 'export const fake = true' }
+  }
+  return result
 }
 
 /**

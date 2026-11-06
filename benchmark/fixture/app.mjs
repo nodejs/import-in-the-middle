@@ -37,11 +37,12 @@ if (active) {
 }
 
 if (mode !== 'none') {
-  const options = mode.endsWith('-excluded')
-    ? { include: [] }
-    : mode.endsWith('-selective')
-      ? { include: [workload === 'small' ? pathToFileURL(target).href : target] }
-      : undefined
+  let options
+  if (mode.endsWith('-excluded')) {
+    options = { include: [] }
+  } else if (mode.endsWith('-selective')) {
+    options = { include: [workload === 'small' ? pathToFileURL(target).href : target] }
+  }
   if (mode.startsWith('sync-')) {
     const { register } = await import(pathToFileURL(resolve(root, 'register-hooks.mjs')).href)
     register(options)

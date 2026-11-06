@@ -57,9 +57,8 @@ function hasIitm (url) {
 function deleteIitm (parsedURL) {
   parsedURL.searchParams.delete('iitm')
   const resultUrl = parsedURL.href
-  return resultUrl.startsWith('file:///node:')
-    ? resultUrl.slice('file:///'.length)
-    : resultUrl
+  if (resultUrl.startsWith('file:///node:')) return resultUrl.slice('file:///'.length)
+  return resultUrl
 }
 
 /**
@@ -138,9 +137,8 @@ function emitWarning (err) {
 function addIitm (url, kind = 'true') {
   if (url.indexOf('?') === -1) {
     const hashIndex = url.indexOf('#')
-    return hashIndex === -1
-      ? `${url}?iitm=${kind}`
-      : `${url.slice(0, hashIndex)}?iitm=${kind}${url.slice(hashIndex)}`
+    if (hashIndex === -1) return `${url}?iitm=${kind}`
+    return `${url.slice(0, hashIndex)}?iitm=${kind}${url.slice(hashIndex)}`
   }
   const urlObj = new URL(url)
   urlObj.searchParams.set('iitm', kind)
@@ -416,9 +414,11 @@ export function createHook (meta) {
     }
 
     // Preserve the format before an outer loader can normalize it.
-    specifiers.set(result.url, result.format === 'module-typescript' || result.format === 'commonjs-typescript'
-      ? { specifier, format: result.format }
-      : specifier)
+    if (result.format === 'module-typescript' || result.format === 'commonjs-typescript') {
+      specifiers.set(result.url, { specifier, format: result.format })
+    } else {
+      specifiers.set(result.url, specifier)
+    }
 
     return {
       url: addIitm(result.url),
@@ -620,9 +620,8 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
     if (parsedURL !== undefined) {
       if (parsedURL.searchParams.get('iitm') === 'bindings') {
         const source = cyclicSources?.get(url)
-        return source === undefined
-          ? parentLoad(url, context)
-          : { source, shortCircuit: true, format: 'module' }
+        if (source === undefined) return parentLoad(url, context)
+        return { source, shortCircuit: true, format: 'module' }
       }
       const realUrl = deleteIitm(parsedURL)
       const result = await getSource(url, context, parentLoad, realUrl)
@@ -674,9 +673,8 @@ register(${JSON.stringify(realUrl)}, __binder, ${JSON.stringify(originalSpecifie
     if (parsedURL !== undefined) {
       if (parsedURL.searchParams.get('iitm') === 'bindings') {
         const source = cyclicSources?.get(url)
-        return source === undefined
-          ? nextLoad(url, context)
-          : { source, shortCircuit: true, format: 'module' }
+        if (source === undefined) return nextLoad(url, context)
+        return { source, shortCircuit: true, format: 'module' }
       }
       const realUrl = deleteIitm(parsedURL)
       const result = getSourceSync(url, context, nextLoad, realUrl)
