@@ -59,14 +59,16 @@ export async function testCircularAttributes (mode) {
         export function names () { return Object.keys(rootNamespace) }
         export function getNamespace () { return rootNamespace }
         export function read () { return import('${root}') }`
+    let leafSource = body
+    if (index >= 10) {
+      leafSource = `${index < 12 ? `import '${helper}';` : ''} export { RegistryError, readStatic, readNamespace, names, getNamespace, read } from '${consumer}';`
+    }
     sources.push(
       [root, `${index >= 8 ? 'export const value = 1;' : ''}
         ${index === 9 ? 'const extra = 5; export { extra as "x-y" }; export default 1;' : ''}
         export { UserError } from '${error}'; export * from '${leaf}';`],
       [error, 'export class UserError extends Error {}'],
-      [leaf, index >= 10
-        ? `${index < 12 ? `import '${helper}';` : ''} export { RegistryError, readStatic, readNamespace, names, getNamespace, read } from '${consumer}';`
-        : body]
+      [leaf, leafSource]
     )
     if (index >= 10) {
       if (index < 12) sources.push([helper, index === 10 ? '' : 'export {}'])

@@ -75,7 +75,7 @@ async function publish (options = {}, calls = []) {
   const script = workflow.split('          script: |\n')[1].replace(/^ {12}/gm, '')
   const wrapped = 'module.exports = async function (github, context, core) {\n' +
     `${script.trimEnd().replace(/^/gm, '  ')}\n}\n`
-  const lint = await new ESLint().lintText(wrapped, { filePath: 'benchmark/workflow-script.cjs' })
+  const lint = await new ESLint({ rulePaths: ['tools/eslint'] }).lintText(wrapped, { filePath: 'benchmark/workflow-script.cjs' })
   assert.deepEqual(lint[0].messages, [])
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
   const execute = new AsyncFunction('require', 'github', 'context', 'core', script)
@@ -108,9 +108,12 @@ async function publish (options = {}, calls = []) {
         updateComment: async input => { calls.push({ operation: 'update', input }) }
       }
     },
-    paginate: async () => options.existing
-      ? [{ id: 7, user: { login: 'github-actions[bot]' }, body: '<!-- import-in-the-middle-benchmark -->' }]
-      : []
+    paginate: async () => {
+      if (options.existing) {
+        return [{ id: 7, user: { login: 'github-actions[bot]' }, body: '<!-- import-in-the-middle-benchmark -->' }]
+      }
+      return []
+    }
   }
   await execute(require, github, {
     repo: { owner: 'nodejs', repo: 'import-in-the-middle' },

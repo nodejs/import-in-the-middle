@@ -127,9 +127,10 @@ function collect (trials, scenario, runs) {
  * @returns {Sample}
  */
 function measure (packageDirectory, scenario) {
-  const argumentsList = !selective && scenario.mode.startsWith('async-')
-    ? ['--loader', resolve(packageDirectory, 'hook.mjs'), fixture]
-    : [fixture]
+  let argumentsList = [fixture]
+  if (!selective && scenario.mode.startsWith('async-')) {
+    argumentsList = ['--loader', resolve(packageDirectory, 'hook.mjs'), fixture]
+  }
   if (process.allowedNodeEnvironmentFlags.has('--disable-warning')) {
     argumentsList.unshift('--disable-warning=ExperimentalWarning', '--disable-warning=DEP0205')
   }

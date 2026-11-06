@@ -17,13 +17,15 @@ export async function testCircularPackageInclude (mode) {
     for (const name of names) {
       const packageDirectory = join(directory, 'node_modules', name)
       await mkdir(packageDirectory, { recursive: true })
+      let leafSource = "import './dependency.js'; export function read () { return 1 }"
+      if (name === 'cycle-package') {
+        leafSource = `import { value } from '${name}'; export function read () { return value }`
+      }
       await Promise.all([
         writeFile(join(packageDirectory, 'package.json'), JSON.stringify({ name, type: 'module', exports: './index.js' })),
         writeFile(join(packageDirectory, 'dependency.js'), ''),
         writeFile(join(packageDirectory, 'index.js'), "export const value = 1; export * from './leaf.js'"),
-        writeFile(join(packageDirectory, 'leaf.js'), name === 'cycle-package'
-          ? `import { value } from '${name}'; export function read () { return value }`
-          : "import './dependency.js'; export function read () { return 1 }")
+        writeFile(join(packageDirectory, 'leaf.js'), leafSource)
       ])
     }
     const entry = join(directory, 'entry.mjs')
