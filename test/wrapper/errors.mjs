@@ -97,43 +97,6 @@ for (const adapter of ['resolve', 'load']) {
   await assertRejectsOnly(() => createWrapperModule(options), matches)
 }
 
-// In `createWrapperModuleSync` an adapter returning a Promise is a synchronous
-// TypeError. The Promise is observed, so its later rejection is not reported
-// as unhandled.
-const unhandled = []
-const onUnhandled = (reason) => unhandled.push(reason)
-process.on('unhandledRejection', onUnhandled)
-
-function rejectLater () {
-  return new Promise((resolve, reject) => setTimeout(() => reject(new Error('late')), 10))
-}
-
-assert.throws(
-  () => createWrapperModuleSync({ ...base, resolve: rejectLater }),
-  (err) => err instanceof TypeError && /resolve\(\)/.test(err.message) && /createWrapperModule\(\)/.test(err.message)
-)
-assert.throws(
-  () => createWrapperModuleSync({ ...base, load: rejectLater }),
-  (err) => err instanceof TypeError && /load\(\)/.test(err.message) && /createWrapperModule\(\)/.test(err.message)
-)
-
-// Any thenable counts, even one whose `then` throws while being observed.
-const thenables = {
-  'plain thenable': () => ({ then (resolve) { resolve({ url: 'file:///virtual/errors/dep.mjs' }) } }),
-  'throwing thenable': () => ({ then () { throw new Error('then threw') } })
-}
-for (const [name, resolve] of Object.entries(thenables)) {
-  assert.throws(
-    () => createWrapperModuleSync({ ...base, resolve }),
-    (err) => err instanceof TypeError && /resolve\(\) returned a Promise/.test(err.message),
-    name
-  )
-}
-
-await new Promise((resolve) => setTimeout(resolve, 50))
-process.off('unhandledRejection', onUnhandled)
-assert.deepEqual(unhandled, [])
-
 // An adapter's own error propagates unchanged: thrown by
 // `createWrapperModuleSync`, rejected by `createWrapperModule`.
 for (const adapter of ['resolve', 'load']) {

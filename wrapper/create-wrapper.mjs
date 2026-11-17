@@ -19,8 +19,6 @@ const RUNTIME_SPECIFIER = './__iitm_runtime__.js'
 const MODULE_SPECIFIER_PREFIX = './__iitm_module_'
 const BUILTIN = Object.freeze({ source: null, format: 'builtin' })
 
-function noop () {}
-
 /** @param {string} name */
 function prefix (name) {
   return `'import-in-the-middle' ${name}()`
@@ -122,24 +120,6 @@ function checkLoaded (name, result, url, resolvedFormat) {
 }
 
 /**
- * Throws when a synchronous adapter returned a thenable. The thenable is
- * observed first so a later rejection is not reported as unhandled.
- *
- * @param {string} name
- * @param {unknown} value
- * @param {string} adapter
- * @param {string} target
- */
-function assertNotThenable (name, value, adapter, target) {
-  if (value !== null && (typeof value === 'object' || typeof value === 'function') && typeof value.then === 'function') {
-    try {
-      value.then(noop, noop)
-    } catch {}
-    throw new TypeError(`${prefix(name)}: ${adapter}() returned a Promise for '${target}'; use createWrapperModule() for asynchronous adapters`)
-  }
-}
-
-/**
  * Validates the options and builds the graph I/O for one call. The root is
  * served from `options.source`, or analyzed as a builtin for a `node:` root,
  * and builtins never reach the caller's `load`. Adapters are required only
@@ -236,25 +216,21 @@ function prepare (options, name, sync) {
   let io
   if (sync) {
     io = {
-      resolve (target, context) {
-        const result = resolveWithAdapter(target, context)
-        assertNotThenable(name, result, 'resolve', target)
-        return checkResolved(name, result, target)
+      resolve: function syncResolve (target, context) {
+        return checkResolved(name, resolveWithAdapter(target, context), target)
       },
-      load (target, context) {
+      load: function syncLoad (target, context) {
         const known = serveKnown(target)
         if (known !== undefined) return known
-        const result = loadWithAdapter(target, context)
-        assertNotThenable(name, result, 'load', target)
-        return recordLoaded(result, target, context.format)
+        return recordLoaded(loadWithAdapter(target, context), target, context.format)
       }
     }
   } else {
     io = {
-      async resolve (target, context) {
+      resolve: async function asyncResolve (target, context) {
         return checkResolved(name, await resolveWithAdapter(target, context), target)
       },
-      async load (target, context) {
+      load: async function asyncLoad (target, context) {
         const known = serveKnown(target)
         if (known !== undefined) return known
         return recordLoaded(await loadWithAdapter(target, context), target, context.format)

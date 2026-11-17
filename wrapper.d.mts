@@ -180,7 +180,6 @@ export declare function createWrapperModule (options: CreateWrapperModuleOptions
  * deprecation period.
  *
  * Synchronous {@link createWrapperModule}, for synchronous hooks such as
- * `module.registerHooks()`. `resolve` and `load` must return synchronously; a
- * Promise from either throws a `TypeError`.
+ * `module.registerHooks()`. `resolve` and `load` must return synchronously.
  */
 export declare function createWrapperModuleSync (options: CreateWrapperModuleSyncOptions): WrapperModule
