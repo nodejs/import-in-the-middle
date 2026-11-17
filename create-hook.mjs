@@ -171,7 +171,7 @@ export function createHook (meta) {
   function * resolveImports (url, context) {
     const cached = moduleImportTargets?.get(url)
     if (cached !== undefined) return cached
-    const { moduleImports } = yield * getModuleExports(url, context, undefined, true)
+    const { moduleImports } = yield * getModuleExports(url, context, true)
     const targets = []
     if (moduleImports !== undefined) {
       for (const imported of moduleImports) {
