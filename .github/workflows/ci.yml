@@ -80,8 +80,12 @@ jobs:
           sudo apt update
           sudo apt install -y lcov
       - name: Combine all coverage data
+        # V8 reports class field initializers as a synthetic function whose
+        # start line differs across Node.js versions (the `class` line up to 22,
+        # the first field from 24). lcov >= 2.4 rejects that as inconsistent, so
+        # drop the synthetic function; its lines keep their coverage.
         run: |
-          find . -type f -name '*.info' -exec echo -a {} \; | xargs --verbose lcov -o all_lcov.info
+          find . -type f -name '*.info' -exec echo -a {} \; | xargs --verbose lcov --erase-functions '<instance_members_initializer>' -o all_lcov.info
       - name: Generate Coverage Report
         run: >
           lcov --summary all_lcov.info
