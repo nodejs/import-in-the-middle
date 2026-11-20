@@ -261,6 +261,100 @@ On Node.js versions where type stripping is not enabled by default, run with
 `--experimental-strip-types`. Older versions that predate
 `module.stripTypeScriptTypes()` leave TypeScript modules untouched.
 
+## Generating facades without the loader (experimental)
+
+> [!WARNING]
+> **This API is experimental and is not covered by semantic versioning.** It
+> may change or be removed in any release, including patch releases, without
+> deprecation. Pin an exact version and review changes before upgrading.
+
+Use `import-in-the-middle/wrapper.mjs` from bundler plugins or custom loaders
+that own module loading. It generates an ESM facade that supports `Hook` and
+`addHook`, including hooks registered after evaluation, without installing
+IITM's loader hooks:
+
+```js
+import { createWrapperModule, createWrapperModuleSync } from 'import-in-the-middle/wrapper.mjs'
+
+const { code, imports } = await createWrapperModule({
+  url: 'file:///app/node_modules/pkg/index.js',
+  source: 'export const value = 42',
+  specifier: 'pkg'
+})
+```
+
+`createWrapperModule` returns a Promise and supports asynchronous adapters.
+Use `createWrapperModuleSync` in synchronous hooks; its adapters must return
+synchronously. Failures propagate to the caller rather than falling back to
+the unwrapped module.
+
+### Inputs
+
+* `url`: the module's canonical absolute URL, used for registration and hook
+  matching. Use the exact same URL string your resolver returns for this module.
+* `source`: currently, only ESM JavaScript is supported, as a string,
+  `ArrayBuffer` or view (including `Buffer`). Bytes are decoded as UTF-8;
+  transpile TypeScript/JSX to ESM before passing it in.
+* `specifier`: the original import specifier, reported to hooks.
+
+For a Node.js builtin, use its `node:` URL and omit source and adapters:
+
+```js
+const http = createWrapperModuleSync({ url: 'node:http', specifier: 'http' })
+```
+
+### Discovering re-exported names
+
+Modules using `export * from` need graph adapters so IITM can discover their
+export names. Direct exports, named re-exports and `export * as name from` do
+not need adapters.
+
+Pass these optional callbacks alongside the other options:
+
+* `resolve(specifier, { parentURL, kind })` returns `{ url, format? }`. Resolve
+  the specifier as written against `parentURL`; `kind` is `import` for ESM star
+  re-exports or `require` for CommonJS re-export chains found in dependencies.
+  Builtins resolve to `node:` URLs with format `builtin`.
+* `load(url, { format })` returns `{ source, format? }` using the same source
+  types as above. Its format overrides the resolver's; if neither provides a
+  format, IITM infers ESM or CommonJS from the source.
+
+Adapters provide graph access, not execution: IITM does not read dependency
+files or resolve CommonJS dependencies itself. The root uses the supplied
+`source`, and builtins are inspected directly; neither reaches `load`. Missing
+adapters fail when needed rather than silently skipping exports.
+
+### Result
+
+Both functions produce `{ code, imports }`. Serve `code` as an ESM module and
+resolve its relative import placeholders using `imports`, keyed by the
+importing facade. Each entry is `{ specifier, kind, url, format? }`, where
+`specifier` is the placeholder and `url` is its canonical target:
+
+* `original`: the wrapped module. Load it unwrapped, not through the facade.
+* `module`: a defining module of a re-exported name. Resolve it to the same
+  instance the original module uses.
+* `runtime`: IITM's registration runtime. Use the same instance as your
+  `Hook`/`addHook` calls.
+
+Cache `code` and `imports` together. Facade evaluation registers the module, so
+bundlers must preserve its side effects and leave `builtin` imports external.
+
+### Integration notes
+
+* Each call analyzes exports afresh. For rebuilds, track the root, modules read
+  through `load`, and files consulted by your adapters as watch dependencies.
+* Interception applies through the facade; accessing the original directly
+  bypasses it. Later assignments inside the original are only partially
+  reflected in facade bindings.
+* The loader's special handling of circular `export *` graphs is not applied.
+  Builtin and CommonJS export names depend on the Node.js version generating
+  the facade, which may differ from the target runtime.
+
+See the [type definitions](wrapper.d.mts) for the API reference and the
+[integration guide](docs/wrapper.md) for module identity, bundling and rebuild
+guidance.
+
 ## Limitations
 
 * You cannot add new exports to a module. You can only modify existing ones.
