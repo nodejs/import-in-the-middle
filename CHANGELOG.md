@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.7.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.6.0...import-in-the-middle-v3.7.0) (2026-11-24)
+
+
+### Features
+
+* add experimental createWrapperModule API for generating facades without the loader ([#317](https://github.com/nodejs/import-in-the-middle/issues/317)) ([a1496cf](https://github.com/nodejs/import-in-the-middle/commit/a1496cfdebd183e10ebef23b391c954ede2391ce))
+
 ## [3.6.0](https://github.com/nodejs/import-in-the-middle/compare/import-in-the-middle-v3.5.3...import-in-the-middle-v3.6.0) (2026-11-06)
 
 
