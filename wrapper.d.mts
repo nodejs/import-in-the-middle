@@ -9,12 +9,14 @@ export type WrapperResolveContext = {
   /** URL of the module declaring the re-export. */
   parentURL: string
   /**
-   * `import` for an ESM `export * from`, `require` for a CommonJS re-export
+   * `import` for an ESM re-export, `require` for a CommonJS re-export
    * (`.json` and `.node` targets are resolved, then skipped without `load`).
    * Either way the specifier arrives as written, such as `./lib`, `pkg` or
    * `#internal`, to be resolved against `parentURL`.
    */
   kind: 'import' | 'require'
+  /** Attributes on this ESM re-export, if present. */
+  importAttributes?: Record<string, string>
 }
 
 export type WrapperResolveResult = {
@@ -25,6 +27,8 @@ export type WrapperResolveResult = {
    * it. Only a `node:` URL may be, and always is, `builtin`.
    */
   format?: string | undefined
+  /** Attributes to use instead of those in the resolve context. */
+  importAttributes?: Record<string, string>
 }
 
 /** JavaScript source. Byte input is decoded as UTF-8. */
@@ -34,15 +38,18 @@ export type WrapperSource = string | ArrayBuffer | ArrayBufferView
 export type WrapperLoadContext = {
   /** The format reported by `resolve`, when known. */
   format?: string
+  /** Attributes on this ESM re-export, if present. */
+  importAttributes?: Record<string, string>
 }
 
 export type WrapperLoadResult = {
   /** Module source. Required; IITM never reads the filesystem for it. */
   source: WrapperSource
   /**
-   * Loader format, overriding `resolve` when provided. Only when neither
-   * adapter supplies a format is ESM syntax treated as ESM and anything else
-   * as CommonJS. Builtins never reach `load`, so `builtin` is rejected.
+   * Loader format, overriding `resolve` when provided. If neither adapter
+   * supplies a format, IITM recognizes the `json` and `text` import types
+   * or infers ESM or CommonJS from the source. Builtins never reach
+   * `load`, so `builtin` is rejected.
    */
   format?: string | undefined
 }
@@ -59,7 +66,7 @@ export type WrapperLoadResult = {
  * - `original`: the wrapped module itself. It must load the original,
  *   unwrapped module: resolving it back to the facade makes the facade import
  *   itself.
- * - `module`: the defining module of a re-exported name. Resolve it normally,
+ * - `module`: a module that provides a re-exported binding. Resolve it normally,
  *   to the instance the wrapped module's own `export *` chain uses, or it is
  *   evaluated twice.
  *
@@ -71,6 +78,8 @@ export type WrapperImport = {
   kind: 'runtime' | 'original' | 'module'
   /** Canonical absolute URL: IITM's runtime, the wrapped `url` or a resolved module URL. */
   url: string
+  /** Attributes emitted on this facade import, if present. */
+  importAttributes?: Record<string, string>
   /**
    * Effective loader format, when known: `load`'s, else `resolve`'s, `builtin`
    * for builtins, `commonjs` for the runtime.
@@ -107,16 +116,16 @@ type CreateWrapperModuleBaseOptions = {
 // Adapters are optional, and `undefined` counts as omitted, also under
 // `exactOptionalPropertyTypes`.
 type WrapperSyncAdapters = {
-  /** Required only when analysis encounters a star or CommonJS re-export. */
+  /** Required when analysis follows a re-export to discover names or compare bindings. */
   resolve?: ((specifier: string, context: WrapperResolveContext) => WrapperResolveResult) | undefined
-  /** Required only when analysis encounters a star or CommonJS re-export of a non-builtin. */
+  /** Required when analysis needs the source of a re-export target other than a builtin. */
   load?: ((url: string, context: WrapperLoadContext) => WrapperLoadResult) | undefined
 }
 
 type WrapperAsyncAdapters = {
-  /** Required only when analysis encounters a star or CommonJS re-export. */
+  /** Required when analysis follows a re-export to discover names or compare bindings. */
   resolve?: ((specifier: string, context: WrapperResolveContext) => WrapperResolveResult | PromiseLike<WrapperResolveResult>) | undefined
-  /** Required only when analysis encounters a star or CommonJS re-export of a non-builtin. */
+  /** Required when analysis needs the source of a re-export target other than a builtin. */
   load?: ((url: string, context: WrapperLoadContext) => WrapperLoadResult | PromiseLike<WrapperLoadResult>) | undefined
 }
 

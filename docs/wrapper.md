@@ -25,7 +25,8 @@ For each manifest entry:
   `${url}?original` to bypass wrapping. That alias becomes the original's
   `import.meta.url`.
 * `module` must reach the same instance used by the original's re-export chain.
-  Do not give these dependencies separate "original" copies.
+  Do not give these dependencies separate "original" copies. Preserve the
+  `importAttributes` from the generated import when present in the manifest.
 * `runtime` must reach the instance used by `Hook`/`addHook`. If the host
   preserves symlinks, map it to the path its `import-in-the-middle` import uses.
 
@@ -47,11 +48,20 @@ relative specifiers and package `#imports`, against the provided `parentURL`.
 The `kind` distinguishes ESM imports from CommonJS `require` re-exports, which
 may need different package conditions.
 
-Analysis requests only sources needed to discover exports, not every imported
-module. The root source is supplied directly and builtins are inspected without
-`load`. CommonJS re-exports of `.json` and `.node` targets are resolved but not
-loaded. Prefer explicit formats from your host; if both adapters omit the
-format, IITM treats source with ESM syntax as ESM and otherwise analyzes it as
+ESM re-export attributes are passed to both adapters as `importAttributes`.
+If the resolver returns attributes, those replace the declared attributes for
+loading and facade imports. Module identity includes the resolved URL and
+the import `type`; an absent type and `javascript` identify the same module.
+Return distinct URLs when your host distinguishes modules using other attributes.
+
+Analysis requests only sources needed to discover exports or to compare bindings
+with the same name from different star branches. Named re-exports are followed
+only for that comparison. This comparison does not disambiguate namespace
+re-exports. The root source is supplied directly and builtins are
+inspected without `load`. Analysis resolves CommonJS re-exports of `.json`
+and `.node` targets without loading them. Prefer explicit formats from your host.
+If both adapters omit the format, IITM recognizes the `json` and `text`
+import types. Otherwise it treats ESM syntax as ESM and analyzes the rest as
 CommonJS. A format returned by `load` takes precedence over `resolve`.
 
 Each generation call analyzes the graph independently, so changed exports at
