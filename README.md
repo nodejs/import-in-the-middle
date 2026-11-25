@@ -311,13 +311,17 @@ not need adapters.
 
 Pass these optional callbacks alongside the other options:
 
-* `resolve(specifier, { parentURL, kind })` returns `{ url, format? }`. Resolve
+* `resolve(specifier, { parentURL, kind, importAttributes })` returns `{ url, format?, importAttributes? }`. Resolve
   the specifier as written against `parentURL`; `kind` is `import` for ESM star
   re-exports or `require` for CommonJS re-export chains found in dependencies.
   Builtins resolve to `node:` URLs with format `builtin`.
-* `load(url, { format })` returns `{ source, format? }` using the same source
+* `load(url, { format, importAttributes })` returns `{ source, format? }` using the same source
   types as above. Its format overrides the resolver's; if neither provides a
-  format, IITM infers ESM or CommonJS from the source.
+  format, IITM uses the `json` or `text` import type when present and otherwise
+  infers ESM or CommonJS from the source.
+
+Both callbacks receive `importAttributes` when the ESM re-export has them.
+The resolver can return replacement attributes for loading and facade imports.
 
 Adapters provide graph access, not execution: IITM does not read dependency
 files or resolve CommonJS dependencies itself. The root uses the supplied

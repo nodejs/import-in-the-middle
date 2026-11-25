@@ -48,10 +48,12 @@ try {
     'index.js': [
       'globalThis.__syncPkgEvaluations = (globalThis.__syncPkgEvaluations || 0) + 1',
       'export function value () { return 41 }',
+      'export * from "./metadata.json" with { type: "json" }',
       "export * from './more.js'",
       ''
     ].join('\n'),
-    'more.js': "export const more = 'more'\n"
+    'more.js': "export const more = 'more'\n",
+    'metadata.json': '{"unused": true}'
   })
   writeFiles(join(dir, 'node_modules', 'sync-tla'), {
     'package.json': '{"type":"module"}',
@@ -95,17 +97,20 @@ try {
         // The hook's source may be bytes, which the wrapper accepts as-is.
         source: result.source ?? sourceOf(result, url),
         specifier: specifiers.get(url) ?? url,
-        resolve (s, { parentURL, kind }) {
+        resolve (s, { parentURL, kind, importAttributes = {} }) {
+          if (s === './metadata.json') assert.deepEqual(importAttributes, { type: 'json' })
           // Specifiers arrive as written. A `nextResolve` captured from a
           // `require` resolves against its own parent module, not `parentURL`,
           // so relative ones are joined here.
           if (s.startsWith('.') || s.startsWith('/')) return { url: new URL(s, parentURL).href }
           if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return { url: s }
           const conditions = kind === 'require' ? ['node', 'require'] : ['node', 'import']
-          return nextResolveForGraph(s, { parentURL, conditions, importAttributes: {} })
+          return nextResolveForGraph(s, { parentURL, conditions, importAttributes })
         },
-        load (u, { format }) {
-          const loaded = nextLoad(u, { format, importAttributes: {} })
+        load (u, { format, importAttributes = {} }) {
+          if (u.endsWith('/metadata.json')) assert.deepEqual(importAttributes, { type: 'json' })
+          if (u.endsWith('/more.js')) assert.deepEqual(importAttributes, {})
+          const loaded = nextLoad(u, { format, importAttributes })
           return { source: sourceOf(loaded, u), format: loaded.format }
         }
       })
@@ -130,6 +135,8 @@ try {
   const required = require('sync-pkg')
   assert.equal(required.value(), 42)
   assert.equal(required.more, 'more')
+  assert.equal(Object.hasOwn(required, 'unused'), false)
+  assert.equal(Object.hasOwn(required, 'module.exports'), false)
   assert.equal(require(pkgIndex).value(), 42)
   const imported = await import(pathToFileURL(pkgIndex).href)
   assert.equal(imported.value(), 42)
@@ -142,6 +149,75 @@ try {
   const tlaUrl = pathToFileURL(join(dir, 'node_modules', 'sync-tla', 'index.js')).href
   assert.equal((await import(tlaUrl)).x, 1)
   assert.ok(wraps.includes(tlaUrl))
+
+  const typedDir = join(dir, 'typed')
+  const importText = process.execArgv.includes('--experimental-import-text')
+  const textStar = importText ? "export * from './text.txt' with { type: 'text' }" : ''
+  const typedSource = `
+    export * from './left.mjs'
+    export * from './right.mjs'
+    export * from './shared.mjs' with { type: 'second' }
+    ${textStar}
+  `
+  const firstStar = "export * from './shared.mjs' with { type: 'first', label: 'keep' }"
+  const root = pathToFileURL(join(typedDir, 'root.mjs')).href
+  const shared = pathToFileURL(join(typedDir, 'shared.mjs')).href
+  const facade = pathToFileURL(join(typedDir, 'facade.mjs')).href
+  writeFiles(typedDir, {
+    'root.mjs': typedSource,
+    'left.mjs': firstStar,
+    'right.mjs': firstStar,
+    'shared.mjs': '',
+    'text.txt': 'export const fromText = 1'
+  })
+
+  function typedModule (context) {
+    if (context.importAttributes.type === 'first') {
+      assert.equal(context.importAttributes.label, 'keep')
+      return { format: 'module', source: "export const contested = 1, first = 'first'" }
+    }
+    assert.equal(context.importAttributes.type, 'second')
+    return { format: 'module', source: "export const contested = 2, second = 'second'" }
+  }
+
+  const { code, imports } = createWrapperModuleSync({
+    url: root,
+    source: typedSource,
+    specifier: root,
+    resolve: (specifier, { parentURL }) => ({ url: new URL(specifier, parentURL).href }),
+    load (url, context) {
+      if (url === shared) return typedModule(context)
+      const source = readFileSync(fileURLToPath(url), 'utf8')
+      return url.endsWith('.txt') ? { source, format: 'text' } : { source }
+    }
+  })
+  writeFileSync(fileURLToPath(facade), code)
+  assert.deepEqual(imports[2], {
+    specifier: './__iitm_module_1__.js',
+    kind: 'module',
+    url: shared,
+    format: 'module',
+    importAttributes: { type: 'first', label: 'keep' }
+  })
+
+  const typedHook = nodeModule.registerHooks({
+    resolve (specifier, context, nextResolve) {
+      const entry = context.parentURL === facade && imports.find((entry) => entry.specifier === specifier)
+      if (entry) return { url: entry.url, format: entry.format, shortCircuit: true }
+      return nextResolve(specifier, context)
+    },
+    load (url, context, nextLoad) {
+      if (url === shared) return { ...typedModule(context), shortCircuit: true }
+      return nextLoad(url, context)
+    }
+  })
+  try {
+    const expected = { first: 'first', second: 'second' }
+    assert.deepEqual({ ...await import(root) }, expected)
+    assert.deepEqual({ ...await import(facade) }, expected)
+  } finally {
+    typedHook.deregister()
+  }
 } finally {
   rmSync(dir, { recursive: true, force: true })
 }

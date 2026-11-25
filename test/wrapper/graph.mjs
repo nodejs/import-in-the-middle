@@ -125,6 +125,38 @@ async function wrap (source, graph, extra = {}) {
   ])
 }
 
+{
+  const graph = virtualGraph({
+    'metadata.json': '{"value":1}',
+    'more.mjs': { source: 'export const more = 1', format: 'module' }
+  })
+  const { exports } = await wrap(`
+    export * from './metadata.json' with { type: 'json' }
+    export * from './more.mjs'
+  `, graph)
+  assert.deepEqual(exports, ['more'])
+  assert.deepEqual(graph.calls.resolve, [
+    ['./metadata.json', { parentURL: rootUrl, kind: 'import', importAttributes: { type: 'json' } }],
+    ['./more.mjs', { parentURL: rootUrl, kind: 'import' }]
+  ])
+  assert.deepEqual(graph.calls.load, [
+    [`${dir}metadata.json`, { format: undefined, importAttributes: { type: 'json' } }],
+    [`${dir}more.mjs`, { format: undefined }]
+  ])
+}
+
+{
+  const graph = virtualGraph({
+    'known.txt': { source: 'export const fromKnownText = 1', format: 'text' },
+    'inferred.txt': 'export const fromInferredText = 1'
+  })
+  const { exports } = await wrap(`
+    export * from './known.txt' with { type: 'text' }
+    export * from './inferred.txt' with { type: 'text' }
+  `, graph)
+  assert.deepEqual(exports, [])
+}
+
 // CommonJS re-exports reach resolve as written, with kind 'require', including
 // package `#` imports and `require('.')`, which the caller resolves.
 {
@@ -286,6 +318,71 @@ for (const source of ['', 'const exports = {}; exports.shared = 1\n']) {
 {
   const { code } = createWrapperModuleSync({ url: 'node:test', specifier: 'node:test' })
   assert.ok(parse(code)[1].some((e) => e.name === 'test'))
+}
+
+{
+  const graph = virtualGraph({ 'leaf.mjs': 'export const value = 1' })
+  const { exports } = await wrap(`
+    export * from './leaf.mjs'
+    export * from './leaf.mjs' with { type: 'javascript' }
+  `, graph)
+  assert.deepEqual(exports, ['value'])
+  assert.equal(graph.calls.load.length, 1)
+}
+
+{
+  const branch = "export * from './leaf.mjs' with { type: 'raw' }"
+  const graph = virtualGraph({ 'left.mjs': branch, 'right.mjs': branch, 'leaf.mjs': 'export const value = 1' })
+  const resolved = { type: 'normalized' }
+  const { exports, imports } = await wrap("export * from './left.mjs'; export * from './right.mjs'", graph, {
+    resolve (specifier, context) {
+      const result = graph.resolve(specifier, context)
+      if (specifier === './leaf.mjs') return { ...result, importAttributes: resolved }
+      return result
+    },
+    load (url, context) {
+      if (url.endsWith('/leaf.mjs')) {
+        assert.deepEqual(context.importAttributes, { type: 'normalized' })
+        delete context.importAttributes.type
+      }
+      return graph.load(url, context)
+    }
+  })
+  assert.deepEqual(exports, ['value'])
+  assert.equal(imports[2].url, `${dir}leaf.mjs`)
+  assert.deepEqual(imports[2].importAttributes, { type: 'normalized' })
+  assert.deepEqual(resolved, { type: 'normalized' })
+}
+
+{
+  const graph = virtualGraph({ 'leaf.mjs': 'export const value = 1' })
+  const { exports } = await wrap("export * from './leaf.mjs' with { type: 'javascript' }", graph, {
+    resolve (specifier, context) {
+      context.importAttributes.type = 'text'
+      return graph.resolve(specifier, context)
+    }
+  })
+  assert.deepEqual(exports, ['value'])
+}
+
+{
+  const graph = virtualGraph({ 'leaf.mjs': 'export const value = 1' })
+  const { exports } = await wrap("export * from './leaf.mjs'", graph, {
+    resolve (specifier, context) {
+      context.importAttributes = { type: 'text' }
+      return graph.resolve(specifier, context)
+    },
+    load (url, context) {
+      assert.equal(context.importAttributes, undefined)
+      context.importAttributes = { type: 'text' }
+      Object.defineProperty(context, 'format', {
+        enumerable: false,
+        get () { assert.fail('read the adapter-owned format') }
+      })
+      return graph.load(url, context)
+    }
+  })
+  assert.deepEqual(exports, ['value'])
 }
 
 // The root is served from `source`, never from load, even through a star cycle

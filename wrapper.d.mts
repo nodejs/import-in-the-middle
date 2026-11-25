@@ -15,6 +15,8 @@ export type WrapperResolveContext = {
    * `#internal`, to be resolved against `parentURL`.
    */
   kind: 'import' | 'require'
+  /** Attributes on this ESM re-export, if present. */
+  importAttributes?: Record<string, string>
 }
 
 export type WrapperResolveResult = {
@@ -25,6 +27,8 @@ export type WrapperResolveResult = {
    * it. Only a `node:` URL may be, and always is, `builtin`.
    */
   format?: string | undefined
+  /** Attributes to use instead of those in the resolve context. */
+  importAttributes?: Record<string, string>
 }
 
 /** JavaScript source. Byte input is decoded as UTF-8. */
@@ -34,15 +38,18 @@ export type WrapperSource = string | ArrayBuffer | ArrayBufferView
 export type WrapperLoadContext = {
   /** The format reported by `resolve`, when known. */
   format?: string
+  /** Attributes on this ESM re-export, if present. */
+  importAttributes?: Record<string, string>
 }
 
 export type WrapperLoadResult = {
   /** Module source. Required; IITM never reads the filesystem for it. */
   source: WrapperSource
   /**
-   * Loader format, overriding `resolve` when provided. Only when neither
-   * adapter supplies a format is ESM syntax treated as ESM and anything else
-   * as CommonJS. Builtins never reach `load`, so `builtin` is rejected.
+   * Loader format, overriding `resolve` when provided. If neither adapter
+   * supplies a format, IITM recognizes the `json` and `text` import types
+   * or infers ESM or CommonJS from the source. Builtins never reach
+   * `load`, so `builtin` is rejected.
    */
   format?: string | undefined
 }
@@ -71,6 +78,8 @@ export type WrapperImport = {
   kind: 'runtime' | 'original' | 'module'
   /** Canonical absolute URL: IITM's runtime, the wrapped `url` or a resolved module URL. */
   url: string
+  /** Attributes emitted on this facade import, if present. */
+  importAttributes?: Record<string, string>
   /**
    * Effective loader format, when known: `load`'s, else `resolve`'s, `builtin`
    * for builtins, `commonjs` for the runtime.

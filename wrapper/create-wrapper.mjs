@@ -17,7 +17,11 @@ import { buildWrapperSource, processModule } from '../lib/wrapper.mjs'
 const runtimeUrl = new URL('../lib/register.js', import.meta.url).href
 const RUNTIME_SPECIFIER = './__iitm_runtime__.js'
 const MODULE_SPECIFIER_PREFIX = './__iitm_module_'
+const ORIGINAL_SPECIFIER = `${MODULE_SPECIFIER_PREFIX}0__.js`
+const ORIGINAL_REQUEST = JSON.stringify(ORIGINAL_SPECIFIER)
 const BUILTIN = Object.freeze({ source: null, format: 'builtin' })
+
+/** @typedef {string | undefined | { url: string, format?: string, importAttributes: Record<string, string> }} ImportMetadata */
 
 /** @param {string} name */
 function prefix (name) {
@@ -63,13 +67,14 @@ function isAbsoluteUrl (url) {
  * @param {string} name
  * @param {unknown} result
  * @param {string} specifier
- * @returns {{ url: string, format?: string }}
+ * @returns {import('../wrapper.d.mts').WrapperResolveResult}
  */
 function checkResolved (name, result, specifier) {
   if (result === null || typeof result !== 'object' || typeof result.url !== 'string' || !isAbsoluteUrl(result.url)) {
     throw new TypeError(`${prefix(name)}: resolve() must return an object with an absolute URL string as url for '${specifier}'`)
   }
-  const { url, format } = result
+  const { url, importAttributes } = result
+  let { format } = result
   if (format != null && typeof format !== 'string') {
     throw new TypeError(`${prefix(name)}: resolve() must return a string format for '${specifier}'`)
   }
@@ -80,10 +85,16 @@ function checkResolved (name, result, specifier) {
     if (format != null && format !== 'builtin') {
       throw new TypeError(`${prefix(name)}: resolve() returned format '${format}' for the builtin '${url}'`)
     }
-    return { url, format: 'builtin' }
-  }
-  if (format === 'builtin') {
+    format = 'builtin'
+  } else if (format === 'builtin') {
     throw new TypeError(`${prefix(name)}: resolve() returned format 'builtin' for '${url}'; resolve builtins to a node: URL`)
+  }
+  if (importAttributes !== undefined) {
+    if (importAttributes === null || typeof importAttributes !== 'object' || Array.isArray(importAttributes) ||
+        Object.values(importAttributes).some(value => typeof value !== 'string')) {
+      throw new TypeError(`${prefix(name)}: resolve() must return string importAttributes for '${specifier}'`)
+    }
+    return { url, format: format ?? undefined, importAttributes: { ...importAttributes } }
   }
   return format == null ? { url } : { url, format }
 }
@@ -160,49 +171,65 @@ function prepare (options, name, sync) {
     throw new TypeError(`${prefix(name)}: options.load must be a function`)
   }
 
-  // The first effective format served per URL, reported in the manifest.
-  /** @type {Map<string, string | undefined>} */
-  const formats = new Map([[url, root.format]])
+  const call = { url, specifier, metadataByKey: undefined, io: undefined, analysis: undefined }
 
   /**
    * Serves the root and builtins; anything else comes from the caller.
    *
    * @param {string} target
+   * @param {string} key
+   * @param {Record<string, string>} [importAttributes]
    * @returns {object | undefined}
    */
-  function serveKnown (target) {
-    if (target === url) return root
+  function serveKnown (target, key, importAttributes) {
+    if (key === url) return root
     if (target.startsWith('node:')) {
-      formats.set(target, 'builtin')
+      recordMetadata(target, key, 'builtin', importAttributes)
       return BUILTIN
+    }
+  }
+
+  /**
+   * @param {string} target
+   * @param {string} key
+   * @param {string | undefined} format
+   * @param {Record<string, string>} [importAttributes]
+   */
+  function recordMetadata (target, key, format, importAttributes) {
+    const metadata = call.metadataByKey ??= new Map()
+    if (!metadata.has(key)) {
+      metadata.set(key, importAttributes === undefined ? format : { url: target, format, importAttributes })
     }
   }
 
   /**
    * @param {unknown} result
    * @param {string} target
+   * @param {string} key
    * @param {string | undefined} resolvedFormat
+   * @param {Record<string, string>} [importAttributes]
    */
-  function recordLoaded (result, target, resolvedFormat) {
+  function recordLoaded (result, target, key, resolvedFormat, importAttributes) {
     const loaded = checkLoaded(name, result, target, resolvedFormat)
-    if (!formats.has(target)) formats.set(target, loaded.format)
+    recordMetadata(target, key, loaded.format, importAttributes)
     return loaded
   }
 
   /**
    * @param {string} target
-   * @param {{ parentURL: string, kind?: 'import' | 'require' }} context
+   * @param {{ parentURL: string, kind?: 'import' | 'require', importAttributes?: Record<string, string> }} context
    */
   function resolveWithAdapter (target, context) {
     if (resolve === undefined) {
       throw new TypeError(`${prefix(name)}: resolve() is required to analyze '${target}' re-exported by '${context.parentURL}'`)
     }
-    return resolve(target, { parentURL: context.parentURL, kind: context.kind ?? 'import' })
+    const { importAttributes } = context
+    return resolve(target, importAttributes === undefined ? context : { ...context, importAttributes: { ...importAttributes } })
   }
 
   /**
    * @param {string} target
-   * @param {{ format?: string }} context
+   * @param {{ format?: string, importAttributes?: Record<string, string> }} context
    */
   function loadWithAdapter (target, context) {
     // Without `load`, analysis stops at the first module it needs, which only
@@ -210,65 +237,71 @@ function prepare (options, name, sync) {
     if (load === undefined) {
       throw new TypeError(`${prefix(name)}: load() is required to analyze '${target}' re-exported by '${url}'`)
     }
-    return load(target, { format: context.format })
+    const { format, importAttributes } = context
+    return load(target, importAttributes === undefined ? context : { format, importAttributes: { ...importAttributes } })
   }
 
-  let io
   if (sync) {
-    io = {
+    call.io = {
       resolve: function syncResolve (target, context) {
         return checkResolved(name, resolveWithAdapter(target, context), target)
       },
       load: function syncLoad (target, context) {
-        const known = serveKnown(target)
+        const { format, importAttributes, key = target } = context
+        const known = serveKnown(target, key, importAttributes)
         if (known !== undefined) return known
-        return recordLoaded(loadWithAdapter(target, context), target, context.format)
+        return recordLoaded(loadWithAdapter(target, context), target, key, format, importAttributes)
       }
     }
   } else {
-    io = {
+    call.io = {
       resolve: async function asyncResolve (target, context) {
         return checkResolved(name, await resolveWithAdapter(target, context), target)
       },
       load: async function asyncLoad (target, context) {
-        const known = serveKnown(target)
+        const { format, importAttributes, key = target } = context
+        const known = serveKnown(target, key, importAttributes)
         if (known !== undefined) return known
-        return recordLoaded(await loadWithAdapter(target, context), target, context.format)
+        return recordLoaded(await loadWithAdapter(target, context), target, key, format, importAttributes)
       }
     }
   }
 
-  const analysis = processModule({ srcUrl: url, context: { format: root.format }, state: createAnalysisState() })
-  return { url, specifier, formats, io, analysis }
+  call.analysis = processModule({ srcUrl: url, context: { format: root.format }, state: createAnalysisState() })
+  return call
 }
 
 /**
  * Builds the facade and its manifest from the analyzed bindings.
  *
- * @param {{ url: string, specifier: string, formats: Map<string, string | undefined> }} call
+ * @param {{ url: string, specifier: string, metadataByKey: Map<string, ImportMetadata> | undefined }} call
  * @param {import('../lib/wrapper.mjs').ProcessResult} result
  */
-function render ({ url, specifier, formats }, { bindings, format }) {
-  const imports = [{ specifier: RUNTIME_SPECIFIER, kind: 'runtime', url: runtimeUrl, format: 'commonjs' }]
-  /** @type {Map<string, string>} */
-  const placeholders = new Map()
+function render ({ url, specifier, metadataByKey }, { bindings, format }) {
+  const original = { specifier: ORIGINAL_SPECIFIER, kind: 'original', url }
+  if (format !== undefined) original.format = format
+  const imports = [{ specifier: RUNTIME_SPECIFIER, kind: 'runtime', url: runtimeUrl, format: 'commonjs' }, original]
 
   /** @param {string} target */
   function mapModule (target) {
-    let placeholder = placeholders.get(target)
-    if (placeholder === undefined) {
-      placeholder = `${MODULE_SPECIFIER_PREFIX}${placeholders.size}__.js`
-      placeholders.set(target, placeholder)
-      const entry = { specifier: placeholder, kind: target === url ? 'original' : 'module', url: target }
-      const targetFormat = formats.get(target)
-      if (targetFormat !== undefined) entry.format = targetFormat
-      imports.push(entry)
+    if (target === url) return ORIGINAL_REQUEST
+
+    const placeholder = `${MODULE_SPECIFIER_PREFIX}${imports.length - 1}__.js`
+    let request = JSON.stringify(placeholder)
+    const entry = { specifier: placeholder, kind: 'module', url: target }
+    const metadata = metadataByKey?.get(target)
+    if (metadata !== undefined && typeof metadata !== 'string') {
+      entry.url = metadata.url
+      entry.importAttributes = metadata.importAttributes
+      if (metadata.format !== undefined) entry.format = metadata.format
+      request += ` with ${JSON.stringify(metadata.importAttributes)}`
+    } else if (metadata !== undefined) {
+      entry.format = metadata
     }
-    return placeholder
+    imports.push(entry)
+    return request
   }
 
-  // Number the original first, before the defining modules of star bindings.
-  mapModule(url)
   const code = buildWrapperSource(url, bindings, specifier, format, RUNTIME_SPECIFIER, mapModule)
   return { code, imports }
 }
