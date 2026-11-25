@@ -394,6 +394,107 @@ for (const source of ['', 'const exports = {}; exports.shared = 1\n']) {
   assert.ok(graph.calls.load.every(([url]) => url !== rootUrl))
 }
 
+{
+  const graph = virtualGraph({
+    'left.mjs': "export * from './right.mjs'; export * from './root.mjs'; export const left = 1",
+    'right.mjs': "export * from './root.mjs'; export * from './left.mjs'; export const right = 1"
+  })
+  const resolve = (specifier, context) => {
+    assert.ok(graph.calls.resolve.length < 12, 'revisited a branch of the active star cycle')
+    return graph.resolve(specifier, context)
+  }
+  const source = "export * from './left.mjs'; export * from './right.mjs'; export const root = 1"
+  const { exports } = await wrap(source, graph, { resolve })
+  assert.deepEqual(exports.sort(), ['left', 'right', 'root'])
+  assert.equal(graph.calls.load.length, 2)
+}
+
+{
+  const graph = virtualGraph({
+    'branch.mjs': "export * from './root.mjs'; export { value } from './not-needed.mjs'"
+  })
+  const { exports } = await wrap("export * from './branch.mjs'", graph)
+  assert.deepEqual(exports, ['value'])
+  assert.deepEqual(graph.calls.load.map(([url]) => url), [`${dir}branch.mjs`])
+}
+
+{
+  const graph = virtualGraph({
+    'branch.mjs': `
+      export * from './root.mjs'
+      export * from './shadowed.mjs'
+      export { value } from './not-needed.mjs'
+    `,
+    'shadowed.mjs': 'export const value = 1'
+  })
+  const { exports } = await wrap("export * from './branch.mjs'", graph)
+  assert.deepEqual(exports, ['value'])
+  assert.deepEqual(graph.calls.load.map(([url]) => url), [`${dir}branch.mjs`, `${dir}shadowed.mjs`])
+}
+
+{
+  const branch = `
+    export * from './root.mjs'
+    export { value as same } from './leaf.mjs'
+    export const contested = 1
+  `
+  const graph = virtualGraph({ 'left.mjs': branch, 'right.mjs': branch, 'leaf.mjs': 'export const value = 1' })
+  const { exports } = await wrap("export * from './left.mjs'; export * from './right.mjs'", graph)
+  assert.deepEqual(exports, ['same'])
+  assert.equal(graph.calls.load.filter(([url]) => url.endsWith('/leaf.mjs')).length, 1)
+}
+
+{
+  const size = 12
+  const names = Array.from({ length: size }, (_, index) => `value${index}`)
+  const files = Object.fromEntries(names.map((name) => {
+    const stars = names.filter((other) => other !== name).map((other) => `export * from './${other}.mjs'`)
+    return [`${name}.mjs`, [...stars, `export const ${name} = 1`].join('\n')]
+  }))
+  const graph = virtualGraph(files)
+  const resolve = (specifier, context) => {
+    assert.ok(graph.calls.resolve.length <= size * size, 'resolved the cyclic graph more than once')
+    return graph.resolve(specifier, context)
+  }
+  const { exports } = await wrap("export * from './value0.mjs'", graph, { resolve })
+  assert.deepEqual(exports.sort(), names.sort())
+  assert.equal(graph.calls.load.length, size)
+}
+
+{
+  const files = {}
+  const levels = 14
+  const starPair = (level) => `export * from './left${level}.mjs'; export * from './right${level}.mjs'`
+  for (let level = 1; level < levels; level++) {
+    files[`left${level}.mjs`] = files[`right${level}.mjs`] = starPair(level + 1)
+  }
+  files[`left${levels}.mjs`] = 'export const left = 1'
+  files[`right${levels}.mjs`] = 'export const right = 1'
+  const graph = virtualGraph(files)
+  const { exports } = await wrap(starPair(1), graph)
+  assert.deepEqual(exports.sort(), ['left', 'right'])
+  assert.equal(graph.calls.resolve.length, 54)
+  assert.equal(graph.calls.load.length, 28)
+}
+
+{
+  const graph = virtualGraph({
+    'cycle.mjs': 'export * from "./root.mjs"; const value = 1; export { value as "module.exports" }'
+  }, { 'node:events': { url: 'node:events' } })
+  const { exports } = await wrap("export * from './cycle.mjs'; export * from 'node:events'", graph)
+  assert.ok(exports.includes('module.exports'))
+}
+
+{
+  const named = "export { default as value } from './data.json' with { type: 'json' }"
+  const graph = virtualGraph({ 'left.mjs': named, 'right.mjs': named, 'data.json': '{"value":1}' })
+  const { exports } = await wrap("export * from './left.mjs'; export * from './right.mjs'", graph)
+  assert.deepEqual(exports, ['value'])
+  const loads = graph.calls.load.filter(([url]) => url.endsWith('/data.json'))
+  assert.ok(loads.length > 0)
+  for (const [, { importAttributes }] of loads) assert.deepEqual(importAttributes, { type: 'json' })
+}
+
 // An empty root has no exports but still registers.
 {
   const graph = virtualGraph({})

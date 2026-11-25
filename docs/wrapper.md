@@ -54,9 +54,11 @@ loading and facade imports. Module identity includes the resolved URL and
 the import `type`; an absent type and `javascript` identify the same module.
 Return distinct URLs when your host distinguishes modules using other attributes.
 
-Analysis requests only sources needed to discover exports, not every imported
-module. The root source is supplied directly and builtins are inspected without
-`load`. Analysis resolves CommonJS re-exports of `.json`
+Analysis requests only sources needed to discover exports or to compare bindings
+with the same name from different star branches. Named re-exports are followed
+only for that comparison. This comparison does not disambiguate namespace
+re-exports. The root source is supplied directly and builtins are
+inspected without `load`. Analysis resolves CommonJS re-exports of `.json`
 and `.node` targets without loading them. Prefer explicit formats from your host.
 If both adapters omit the format, IITM recognizes the `json` and `text`
 import types. Otherwise it treats ESM syntax as ESM and analyzes the rest as

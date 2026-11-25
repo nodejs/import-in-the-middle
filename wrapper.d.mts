@@ -9,7 +9,7 @@ export type WrapperResolveContext = {
   /** URL of the module declaring the re-export. */
   parentURL: string
   /**
-   * `import` for an ESM `export * from`, `require` for a CommonJS re-export
+   * `import` for an ESM re-export, `require` for a CommonJS re-export
    * (`.json` and `.node` targets are resolved, then skipped without `load`).
    * Either way the specifier arrives as written, such as `./lib`, `pkg` or
    * `#internal`, to be resolved against `parentURL`.
@@ -66,7 +66,7 @@ export type WrapperLoadResult = {
  * - `original`: the wrapped module itself. It must load the original,
  *   unwrapped module: resolving it back to the facade makes the facade import
  *   itself.
- * - `module`: the defining module of a re-exported name. Resolve it normally,
+ * - `module`: a module that provides a re-exported binding. Resolve it normally,
  *   to the instance the wrapped module's own `export *` chain uses, or it is
  *   evaluated twice.
  *
@@ -116,16 +116,16 @@ type CreateWrapperModuleBaseOptions = {
 // Adapters are optional, and `undefined` counts as omitted, also under
 // `exactOptionalPropertyTypes`.
 type WrapperSyncAdapters = {
-  /** Required only when analysis encounters a star or CommonJS re-export. */
+  /** Required when analysis follows a re-export to discover names or compare bindings. */
   resolve?: ((specifier: string, context: WrapperResolveContext) => WrapperResolveResult) | undefined
-  /** Required only when analysis encounters a star or CommonJS re-export of a non-builtin. */
+  /** Required when analysis needs the source of a re-export target other than a builtin. */
   load?: ((url: string, context: WrapperLoadContext) => WrapperLoadResult) | undefined
 }
 
 type WrapperAsyncAdapters = {
-  /** Required only when analysis encounters a star or CommonJS re-export. */
+  /** Required when analysis follows a re-export to discover names or compare bindings. */
   resolve?: ((specifier: string, context: WrapperResolveContext) => WrapperResolveResult | PromiseLike<WrapperResolveResult>) | undefined
-  /** Required only when analysis encounters a star or CommonJS re-export of a non-builtin. */
+  /** Required when analysis needs the source of a re-export target other than a builtin. */
   load?: ((url: string, context: WrapperLoadContext) => WrapperLoadResult | PromiseLike<WrapperLoadResult>) | undefined
 }
 

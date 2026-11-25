@@ -177,6 +177,45 @@ try {
   assert.equal(sameFacade.same(), 'hooked')
   sameHook.unhook()
 
+  const namedDir = join(dir, 'node_modules', 'named-pkg')
+  writeFiles(namedDir, {
+    'package.json': '{"type":"module"}',
+    'index.js': "export * from './left.js'; export * from './right.js'",
+    'left.js': `
+      export { viaBarrel as same, left as contested } from './barrel.js'
+      export { a as spelling } from './leaf.js'
+      export { firstAlias as namespaced } from './leaf.js'
+    `,
+    'right.js': String.raw`
+      import { viaAlias } from './leaf.js'
+      export { viaAlias as same }
+      export { right as contested } from './leaf.js'
+      export { "\\u0061" as spelling } from './leaf.js'
+      export { secondAlias as namespaced } from './leaf.js'
+    `,
+    'barrel.js': "export * from './leaf.js'",
+    'namespace.js': 'export const shared = 1',
+    'leaf.js': String.raw`
+      import * as namespace from './namespace.js'
+      const value = 7, escaped = 2
+      export { value as viaBarrel, value as viaAlias, escaped as "\\u0061" }
+      export { namespace as firstAlias, namespace as secondAlias }
+      export const left = 1, right = 1, \u{61} = 1
+    `
+  })
+  const namedUrl = pathToFileURL(join(namedDir, 'index.js')).href
+  const namedResult = await createWrapperModule(options(namedUrl, 'named-pkg'))
+  const nativeNamed = await import(namedUrl)
+  const facadeNamed = await importFacade(join(dir, 'named-facade.mjs'), namedResult)
+  assert.deepEqual(Object.keys(nativeNamed), ['namespaced', 'same'])
+  assert.deepEqual({ ...facadeNamed }, { ...nativeNamed })
+  const namedHook = new Hook(['named-pkg'], (exported) => {
+    exported.same = 42
+  })
+  assert.equal(facadeNamed.same, 42)
+  assert.equal(nativeNamed.same, 7)
+  namedHook.unhook()
+
   // A builtin facade registers under its `node:` URL, which Hook matches by
   // the bare name, and patches only the facade's bindings.
   const events = await import('node:events')
